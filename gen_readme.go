@@ -1,4 +1,11 @@
-# Zummon
+package main
+
+import (
+    "os"
+)
+
+func main() {
+    content := `# Zummon
 
 Summon an application to the foreground or launch it if not running.
 
@@ -64,92 +71,100 @@ be fixed in the future.
 ## Installation
 
 ### From Source
-```bash
-git clone https://github.com/hced/zummon.git
-cd zummon
-cargo build --release
-cp target/release/zummon /usr/local/bin/
-```
+`
+    content += "```bash\n"
+    content += "git clone https://github.com/hced/zummon.git\n"
+    content += "cd zummon\n"
+    content += "cargo build --release\n"
+    content += "cp target/release/zummon /usr/local/bin/\n"
+    content += "```\n\n"
 
-### Requirements
+    content += `### Requirements
 
 - Rust 1.70+
-- Linux: `pgrep` (usually pre-installed)
-- macOS: `pgrep` (usually pre-installed) or `ps`
+- Linux: ` + "`pgrep`" + ` (usually pre-installed)
+- macOS: ` + "`pgrep`" + ` (usually pre-installed) or ` + "`ps`" + `
 - Windows: PowerShell 5.0+
 
 ## Usage
 
 ### Basic
-```bash
-# Focus Firefox if running, otherwise launch it
-zummon firefox
+`
+    content += "```bash\n"
+    content += "# Focus Firefox if running, otherwise launch it\n"
+    content += "zummon firefox\n"
+    content += "\n"
+    content += "# Always launch a new instance\n"
+    content += "zummon --new-instance nvim\n"
+    content += "\n"
+    content += "# Use explicit app-id for matching\n"
+    content += "zummon --app-id org.kde.dolphin dolphin\n"
+    content += "```\n\n"
 
-# Always launch a new instance
-zummon --new-instance nvim
+    content += `### Terminal Applications (TUI)
+`
+    content += "```bash\n"
+    content += "# Launch yazi in a terminal, focus existing window on subsequent runs\n"
+    content += "zummon --tui yazi\n"
+    content += "\n"
+    content += "# Custom terminal\n"
+    content += "zummon --tui --terminal alacritty btop\n"
+    content += "```\n\n"
 
-# Use explicit app-id for matching
-zummon --app-id org.kde.dolphin dolphin
-```
+    content += `### Version Resolution
+`
+    content += "```bash\n"
+    content += "# Launch latest Blender from versioned directory\n"
+    content += "zummon --latest ~/Applications/blender blender\n"
+    content += "\n"
+    content += "# Implicit latest when APP is a directory\n"
+    content += "zummon ~/Applications/blender blender\n"
+    content += "```\n\n"
 
-### Terminal Applications (TUI)
-```bash
-# Launch yazi in a terminal, focus existing window on subsequent runs
-zummon --tui yazi
+    content += `### Window States
+`
+    content += "```bash\n"
+    content += "# Launch maximized and floating (Linux/Wayland)\n"
+    content += "zummon --maximized-to-edges --floating myapp\n"
+    content += "\n"
+    content += "# Apply states when focusing existing window\n"
+    content += "zummon --override --fullscreen myapp\n"
+    content += "```\n\n"
 
-# Custom terminal
-zummon --tui --terminal alacritty btop
-```
+    content += `### Environment Variables
 
-### Version Resolution
-```bash
-# Launch latest Blender from versioned directory
-zummon --latest ~/Applications/blender blender
+Set environment variables (each requires its own ` + "`-e`" + ` flag):
+`
+    content += "```bash\n"
+    content += "zummon -e FOO=bar -e BAZ=qux myapp\n"
+    content += "```\n\n"
 
-# Implicit latest when APP is a directory
-zummon ~/Applications/blender blender
-```
+    content += `Qt-specific vars example:
+`
+    content += "```bash\n"
+    content += "zummon -e QT_SCALE_FACTOR=2 -e QT_QPA_PLATFORM=xcb myapp\n"
+    content += "```\n\n"
 
-### Window States
-```bash
-# Launch maximized and floating (Linux/Wayland)
-zummon --maximized-to-edges --floating myapp
+    content += `Force XWayland for legacy apps (Linux only):
+`
+    content += "```bash\n"
+    content += "zummon --use-xwayland my-legacy-app\n"
+    content += "```\n\n"
 
-# Apply states when focusing existing window
-zummon --override --fullscreen myapp
-```
-
-### Environment Variables
-
-Set environment variables (each requires its own `-e` flag):
-```bash
-zummon -e FOO=bar -e BAZ=qux myapp
-```
-
-Qt-specific vars example:
-```bash
-zummon -e QT_SCALE_FACTOR=2 -e QT_QPA_PLATFORM=xcb myapp
-```
-
-Force XWayland for legacy apps (Linux only):
-```bash
-zummon --use-xwayland my-legacy-app
-```
-
-### Debugging
+    content += `### Debugging
 
 You may log debug info to console, a default or custom file, or both.
 
-- Console (stdout): `zummon --debug myapp`
-- Default logfile: `zummon --log myapp`
-- Custom file: `zummon --log=/tmp/custom.log myapp`
-- Combined: `zummon --debug --log myapp`
+- Console (stdout): ` + "`zummon --debug myapp`" + `
+- Default logfile: ` + "`zummon --log myapp`" + `
+- Custom file: ` + "`zummon --log=/tmp/custom.log myapp`" + `
+- Combined: ` + "`zummon --debug --log myapp`" + `
 
 ### Default Log Locations
 
-- Linux: `~/.local/state/zummon/zummon.log`
-- macOS: `~/Library/Logs/zummon/zummon.log`
-- Windows: `%LOCALAPPDATA%\zummon\logs\zummon.log`
+- Linux: ` + "`~/.local/state/zummon/zummon.log`" + `
+- macOS: ` + "`~/Library/Logs/zummon/zummon.log`" + `
+- Windows: ` + "`%LOCALAPPDATA%\\zummon\\logs\\zummon.log`" + `
 
 ## Exit Status
 
@@ -163,3 +178,7 @@ MIT
 ## Author
 
 H. Cederblad
+`
+
+    os.WriteFile("README.md", []byte(content), 0644)
+}
