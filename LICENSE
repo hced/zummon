@@ -1,3 +1,8 @@
+This license applies only to the source code of this project.
+For terms regarding the logo and branding assets, see NOTICE.
+
+---
+
 MIT License
 
 Copyright (c) 2026 H. Cederblad
@@ -19,10 +24,3 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
-
-LOGO AND BRANDING
-
-The Zummon logo and all branding assets in the assets/branding/ directory are
-Copyright (c) 2026 H. Cederblad. All rights reserved. These assets are
-NOT covered by the above MIT License and may NOT be used, modified, or
-distributed without explicit permission.
