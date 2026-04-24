@@ -1,21 +1,14 @@
-# Zummon
+![Zummon Logo](assets/zummon_logo-512.png#gh-light-mode-only)![Zummon Logo](assets/zummon_logo-alt-512.png#gh-dark-mode-only)
 
-Summon an application to the foreground or launch it if not running.
+Summon any application to the foreground – or launch it if it isn't running.
 
 ## Overview
 
-Zummon is a cross-platform CLI tool that intelligently manages
-application windows. When invoked, it first checks if an instance of the
-application is already running. If found, it focuses the existing
-window. If not, it launches a new instance.
+Zummon is a cross-platform CLI tool that intelligently manages application windows. When invoked, it first checks if an instance of the application is already running. If found, it focuses the existing window. If not, it launches a new instance.
 
-For applications where the window's class/ID differs from the binary
-name (common with AppImages, browsers, and terminal emulators), Zummon
-uses heuristic matching to find the correct window automatically.
+For applications where the window's class/ID differs from the binary name (common with AppImages, browsers, and terminal emulators), Zummon uses heuristic matching to find the correct window automatically.
 
-It can also intelligently determine the latest version if you have a
-root directory containing multiple versioned subdirectories for a
-particular program.
+It can also intelligently determine the latest version if you have a root directory containing multiple versioned subdirectories for a particular program.
 
 ## Features
 
@@ -37,10 +30,7 @@ particular program.
 
 ## Platform Support Matrix
 
-**Note:** The program has currently only been tested on Niri. All other
-platforms and window systems should be regarded as untested and may not
-work properly. Feel free to file issue reports so they can potentially
-be fixed in the future.
+**Note:** The program has currently only been tested on Niri. All other platforms and window systems should be regarded as untested and may not work properly. Feel free to file issue reports so they can potentially be fixed in the future.
 
 ### Operating Systems
 
