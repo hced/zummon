@@ -1,6 +1,6 @@
 <p align="center">
-  <img src="assets/zummon_logo-512.png#gh-light-mode-only" alt="Zummon Logo" width="512">
-  <img src="assets/zummon_logo-alt-512.png#gh-dark-mode-only" alt="Zummon Logo" width="512">
+  <img src="assets/branding/zummon_logo-512.png#gh-light-mode-only" alt="Zummon Logo" width="512">
+  <img src="assets/branding/zummon_logo-alt-512.png#gh-dark-mode-only" alt="Zummon Logo" width="512">
 </p>
 
 Summon any application to the foreground – or launch it if it isn't running.
