@@ -1,4 +1,4 @@
-![Zummon Logo](assets/zummon_logo-512.png#gh-light-mode-only)![Zummon Logo](assets/zummon_logo-alt-512.png#gh-dark-mode-only)
+![Zummon Logo](assets/zummon_logo-256.png#gh-light-mode-only)![Zummon Logo](assets/zummon_logo-alt-256.png#gh-dark-mode-only)
 
 Summon any application to the foreground – or launch it if it isn't running.
 
