@@ -174,7 +174,7 @@ You may log debug info to console, a default or custom file, or both.
 
 The source code is licensed under the MIT License (see LICENSE).
 
-The Zummon logo and branding assets are Copyright © 2026 H. Cederblad.
+The Zummon logo and branding assets are Copyright © 2026–present H. Cederblad.
 All rights reserved. See NOTICE for full terms.
 
 ## Author
