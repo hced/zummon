@@ -5,13 +5,33 @@
 
 Summon any application to the foreground – or launch it if it isn't running.
 
+---
+
+**⚠ Status:** Currently this program has been tested on **Linux with Niri**. While it includes adapters for macOS, Windows, Hyprland, Sway, Mutter (GNOME) and KWin (KDE), these are **unverified** and may not work correctly. Testing and contributions are welcome.
+
+---
+
 ## Overview
 
 Zummon is a cross-platform CLI tool that intelligently manages application windows. When invoked, it first checks if an instance of the application is already running. If found, it focuses the existing window. If not, it launches a new instance.
 
 For applications where the window's class/ID differs from the binary name (common with AppImages, browsers, and terminal emulators), Zummon uses heuristic matching to find the correct window automatically.
 
-It can also intelligently determine the latest version if you have a root directory containing multiple versioned subdirectories for a particular program.
+It can also intelligently determine the latest program version if you have a root directory containing multiple versioned subdirectories:
+
+```
+zummon ~/.local/opt blender
+
+.local/opt/blender 
+├── blender-5.0.1-linux-x64
+│   ├── 5.0
+│   ├── blender
+│   ├── ...
+└── blender-5.1.0-linux-x64
+    ├── 5.1
+    ├── blender <-- will match this executable
+    ├── ...
+```
 
 ## Features
 
@@ -21,10 +41,16 @@ It can also intelligently determine the latest version if you have a root direct
 - **Cross-Platform:** Runs on Linux (X11/Wayland), macOS, and Windows.
 - **Process Detection:** Finds running processes even when the window class mismatches.
 - **Heuristic Matching:** Uses the Jaro-Winkler algorithm for fuzzy window matching.
-- **Version Resolution:** Launches the latest version from a versioned directory tree.
-- **TUI Support:** Launches terminal applications with proper custom window classes.
-- **Environment Variables:** Injects custom environment variables into launched apps.
+- **Version Resolution:** Can launch the latest application from a versioned directory tree.
+- **TUI Support:** Can launch TUI apps in separate terminal windows with custom window classes.
+- **Environment Variables:** Can inject custom environment variables into launched apps.
 - **Debug Logging:** Supports console output and file logging with automatic rotation.
+
+### Smart Focus Actions
+
+* **Alternative action if focused:** Using the `--if-focused` flag you can run an alternative command when the target app is already focused. For example, tell Ghostty to open a new window instead of doing nothing: `zummon --if-focused "ghostty +new-window" ghostty`.
+* **App Toggling:** Using the same flag you can create toggles between two apps: `zummon --if-focused "zummon app2" app1` + `zummon --if-focused "zummon app1" app2`.
+* **Toggle Chains:** Similarly, you can even set up multi-app toggle chains by cycling through a list of apps, launching any that aren't running yet: `zummon --if-focused "zummon app2" app1` + `zummon --if-focused "zummon app3" app2` + `zummon --if-focused "zummon app1" app3`.
 
 ### Window Management
 
@@ -56,7 +82,7 @@ It can also intelligently determine the latest version if you have a root direct
 
 ## Installation
 
-### From Source
+### From Source (Linux, macOS)
 ```bash
 git clone https://github.com/hced/zummon.git
 cd zummon
@@ -64,14 +90,9 @@ cargo build --release
 cp target/release/zummon /usr/local/bin/
 ```
 
-### Requirements
+## Usage (Linux)
 
-- Rust 1.70+
-- Linux: `pgrep` (usually pre-installed)
-- macOS: `pgrep` (usually pre-installed) or `ps`
-- Windows: PowerShell 5.0+
-
-## Usage
+These examples are Linux-specific but should be pretty similar on other platforms.
 
 ### Basic
 ```bash
@@ -151,7 +172,11 @@ You may log debug info to console, a default or custom file, or both.
 
 ## License
 
-MIT
+The source code is licensed under the MIT License (see LICENSE).
+
+The Zummon logo and branding assets are Copyright © 2026 H. Cederblad.
+All rights reserved. They may not be used, modified, or distributed
+without explicit permission.
 
 ## Author
 
