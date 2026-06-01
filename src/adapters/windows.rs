@@ -164,7 +164,8 @@ impl Adapter for WindowsAdapter {
         }
 
         let matching = windows
-            .iter().rfind(|w| w.app_id.to_lowercase().ends_with(&app_id_lower));
+            .iter()
+            .rfind(|w| w.app_id.to_lowercase().ends_with(&app_id_lower));
 
         Ok(matching.map(|w| w.id.clone()))
     }

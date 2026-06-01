@@ -70,9 +70,10 @@ impl SwayAdapter {
 
     fn find_windows(&self, node: &SwayNode, windows: &mut Vec<SwayNode>) {
         if (node.node_type == "con" || node.node_type == "floating_con")
-            && (node.app_id.is_some() || node.window_properties.is_some()) {
-                windows.push(node.clone());
-            }
+            && (node.app_id.is_some() || node.window_properties.is_some())
+        {
+            windows.push(node.clone());
+        }
 
         for child in &node.nodes {
             self.find_windows(child, windows);

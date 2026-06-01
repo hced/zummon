@@ -33,17 +33,19 @@ pub fn is_process_running(binary: &str) -> Result<bool> {
         // Try stripped suffixes
         for suffix in ["-bin", "-browser", "-stable", "-beta", "-nightly", "-dev"] {
             if let Some(stripped) = binary_name.strip_suffix(suffix)
-                && proc_name == stripped {
-                    return Ok(true);
-                }
+                && proc_name == stripped
+            {
+                return Ok(true);
+            }
         }
 
         // Try stripped prefixes
         for prefix in ["bin-", "browser-", "stable-", "beta-", "nightly-", "dev-"] {
             if let Some(stripped) = binary_name.strip_prefix(prefix)
-                && proc_name == stripped {
-                    return Ok(true);
-                }
+                && proc_name == stripped
+            {
+                return Ok(true);
+            }
         }
 
         // Try hyphen parts

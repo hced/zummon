@@ -258,8 +258,9 @@ async fn phase1_wax_glob(
             (None, Some(_)) => return std::cmp::Ordering::Greater,
             (None, None) => {}
         }
-        if use_mod_time
-            && let (Some(bt), Some(at)) = (&b.mod_time, &a.mod_time) { return bt.cmp(at) }
+        if use_mod_time && let (Some(bt), Some(at)) = (&b.mod_time, &a.mod_time) {
+            return bt.cmp(at);
+        }
         a.stem_len.cmp(&b.stem_len)
     });
 
@@ -633,9 +634,10 @@ async fn is_executable(path: &Path, _filename_lower: &str) -> bool {
     };
 
     if let Some(ext) = path.extension().and_then(|e| e.to_str())
-        && exec_exts.iter().any(|&e| ext.to_lowercase() == e) {
-            return true;
-        }
+        && exec_exts.iter().any(|&e| ext.to_lowercase() == e)
+    {
+        return true;
+    }
 
     #[cfg(unix)]
     {
@@ -701,10 +703,13 @@ fn sort_candidates(a: &Candidate, b: &Candidate, use_mod_time: bool) -> std::cmp
         (None, None) => {}
     }
     if (use_mod_time || a.version == b.version)
-        && let (Some(bt), Some(at)) = (&b.mod_time, &a.mod_time) { match bt.cmp(at) {
+        && let (Some(bt), Some(at)) = (&b.mod_time, &a.mod_time)
+    {
+        match bt.cmp(at) {
             std::cmp::Ordering::Equal => {}
             ord => return ord,
-        } }
+        }
+    }
     match a.stem_len.cmp(&b.stem_len) {
         std::cmp::Ordering::Equal => {}
         ord => return ord,

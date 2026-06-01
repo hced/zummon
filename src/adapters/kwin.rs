@@ -1,13 +1,13 @@
 // src/adapters/kwin.rs - KDE/KWin window system implementation
-use anyhow::{Result, Context, anyhow};
-use async_trait::async_trait;
-use serde::{Deserialize, Serialize};
-use tokio::process::Command;
 use crate::cli::WindowStateFlag;
 use crate::traits::{Adapter, WindowState};
 use crate::zummon_debug;
+use anyhow::{Context, Result, anyhow};
+use async_trait::async_trait;
+use serde::{Deserialize, Serialize};
 use std::process::Command as StdCommand;
 use std::process::Stdio;
+use tokio::process::Command;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct KdeWindow {
@@ -39,7 +39,11 @@ impl KwinAdapter {
 
     async fn kwin_script(&self, script: &str) -> Result<String> {
         let output = Command::new("qdbus")
-            .args(["org.kde.KWin", "/Scripting", "org.kde.kwin.Scripting.loadScript"])
+            .args([
+                "org.kde.KWin",
+                "/Scripting",
+                "org.kde.kwin.Scripting.loadScript",
+            ])
             .arg(script)
             .output()
             .await?;
@@ -65,7 +69,9 @@ impl KwinAdapter {
                 workspace: c.desktop,
                 pid: c.pid
             })))
-        "#.replace('\n', " ").replace("  ", " ");
+        "#
+        .replace('\n', " ")
+        .replace("  ", " ");
 
         let output = self.kwin_script(&script).await?;
         if output.trim().is_empty() {
@@ -106,8 +112,12 @@ impl KwinAdapter {
 
             for window in &post_windows {
                 if !pre_ids.contains(&window.id) {
-                    zummon_debug!("New window detected after {}ms: id={}, app_id={}",
-                           attempt * interval_ms, window.id, window.app_id);
+                    zummon_debug!(
+                        "New window detected after {}ms: id={}, app_id={}",
+                        attempt * interval_ms,
+                        window.id,
+                        window.app_id
+                    );
 
                     return Ok(Some(window.app_id.clone()));
                 }
@@ -135,7 +145,8 @@ impl Adapter for KwinAdapter {
         }
 
         let matching = windows
-            .iter().rfind(|w| w.app_id.to_lowercase().ends_with(&app_id_lower));
+            .iter()
+            .rfind(|w| w.app_id.to_lowercase().ends_with(&app_id_lower));
 
         Ok(matching.map(|w| w.id.clone()))
     }
@@ -242,7 +253,11 @@ impl Adapter for KwinAdapter {
         Ok(())
     }
 
-    async fn apply_window_state(&self, pre_spawn_ids: &[String], states: &[WindowState]) -> Result<()> {
+    async fn apply_window_state(
+        &self,
+        pre_spawn_ids: &[String],
+        states: &[WindowState],
+    ) -> Result<()> {
         let timeout_ms = 3000;
         let interval_ms = 100;
         let max_attempts = timeout_ms / interval_ms;
@@ -262,7 +277,11 @@ impl Adapter for KwinAdapter {
             }
         }
 
-        tracing::warn!("[zummon {}] Timed out waiting for new window after {}ms", env!("CARGO_PKG_VERSION"), timeout_ms);
+        tracing::warn!(
+            "[zummon {}] Timed out waiting for new window after {}ms",
+            env!("CARGO_PKG_VERSION"),
+            timeout_ms
+        );
         Ok(())
     }
 }

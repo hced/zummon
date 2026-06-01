@@ -1,9 +1,9 @@
 // src/adapters/mutter.rs - GNOME/Mutter window system implementation
-use anyhow::{Result, anyhow};
-use async_trait::async_trait;
 use crate::cli::WindowStateFlag;
 use crate::traits::{Adapter, WindowState};
 use crate::zummon_debug;
+use anyhow::{Result, anyhow};
+use async_trait::async_trait;
 use std::process::Command as StdCommand;
 use std::process::Stdio;
 
@@ -39,7 +39,9 @@ impl Adapter for MutterAdapter {
     }
 
     async fn focus_window(&self, _window_id: &str) -> Result<()> {
-        Err(anyhow!("GNOME/Mutter window focusing is not supported without an extension."))
+        Err(anyhow!(
+            "GNOME/Mutter window focusing is not supported without an extension."
+        ))
     }
 
     async fn spawn_command_string(&mut self, cmd_str: &str) -> Result<()> {
@@ -66,11 +68,21 @@ impl Adapter for MutterAdapter {
         Ok(Vec::new())
     }
 
-    async fn apply_states_to_window(&self, _window_id: &str, _states: &[WindowState]) -> Result<()> {
-        Err(anyhow!("GNOME/Mutter window state management is not supported without an extension."))
+    async fn apply_states_to_window(
+        &self,
+        _window_id: &str,
+        _states: &[WindowState],
+    ) -> Result<()> {
+        Err(anyhow!(
+            "GNOME/Mutter window state management is not supported without an extension."
+        ))
     }
 
-    async fn apply_window_state(&self, _pre_spawn_ids: &[String], _states: &[WindowState]) -> Result<()> {
+    async fn apply_window_state(
+        &self,
+        _pre_spawn_ids: &[String],
+        _states: &[WindowState],
+    ) -> Result<()> {
         Ok(())
     }
 }

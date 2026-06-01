@@ -194,7 +194,8 @@ impl Adapter for HyprlandAdapter {
         }
 
         let matching = windows
-            .iter().rfind(|w| w.class.to_lowercase().ends_with(&app_id_lower));
+            .iter()
+            .rfind(|w| w.class.to_lowercase().ends_with(&app_id_lower));
 
         Ok(matching.map(|w| w.address.clone()))
     }

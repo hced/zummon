@@ -88,22 +88,23 @@ impl NiriAdapter {
         }
 
         if let Some(layout) = &window.layout
-            && let Some(size) = layout.window_size {
-                let win_w = size[0];
-                let win_h = size[1];
+            && let Some(size) = layout.window_size
+        {
+            let win_w = size[0];
+            let win_h = size[1];
 
-                let w_diff = (screen_w as i32 - win_w as i32).abs();
-                let h_diff = (screen_h as i32 - win_h as i32).abs();
+            let w_diff = (screen_w as i32 - win_w as i32).abs();
+            let h_diff = (screen_h as i32 - win_h as i32).abs();
 
-                if w_diff <= 8 && h_diff <= 8 {
-                    return WindowState::Fullscreen;
-                }
-
-                let h_tolerance = (screen_h as f32 * 0.05) as i32;
-                if w_diff <= 100 && h_diff <= h_tolerance {
-                    return WindowState::MaximizeEdges;
-                }
+            if w_diff <= 8 && h_diff <= 8 {
+                return WindowState::Fullscreen;
             }
+
+            let h_tolerance = (screen_h as f32 * 0.05) as i32;
+            if w_diff <= 100 && h_diff <= h_tolerance {
+                return WindowState::MaximizeEdges;
+            }
+        }
 
         WindowState::Floating
     }
@@ -276,18 +277,19 @@ impl Adapter for NiriAdapter {
         let current_category = self.get_window_state_category(window, screen_w, screen_h);
 
         if let Some(layout) = &window.layout
-            && let Some(size) = layout.window_size {
-                zummon_debug!(
-                    "Window {} current: category={:?}, size={}x{}, floating={}, screen={}x{}",
-                    window_id,
-                    current_category,
-                    size[0],
-                    size[1],
-                    window.is_floating,
-                    screen_w,
-                    screen_h
-                );
-            }
+            && let Some(size) = layout.window_size
+        {
+            zummon_debug!(
+                "Window {} current: category={:?}, size={}x{}, floating={}, screen={}x{}",
+                window_id,
+                current_category,
+                size[0],
+                size[1],
+                window.is_floating,
+                screen_w,
+                screen_h
+            );
+        }
 
         for state in states {
             let should_apply = match state {

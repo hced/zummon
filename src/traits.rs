@@ -1,7 +1,7 @@
 // src/traits.rs - Window system abstraction layer
+use crate::cli::WindowStateFlag;
 use anyhow::Result;
 use async_trait::async_trait;
-use crate::cli::WindowStateFlag;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum WindowState {
@@ -92,5 +92,9 @@ pub trait Adapter: Send + Sync {
     async fn get_window_ids(&self) -> Result<Vec<String>>;
     async fn validate_states(&self, states: Vec<WindowStateFlag>) -> Result<Vec<WindowState>>;
     async fn apply_states_to_window(&self, window_id: &str, states: &[WindowState]) -> Result<()>;
-    async fn apply_window_state(&self, pre_spawn_ids: &[String], states: &[WindowState]) -> Result<()>;
+    async fn apply_window_state(
+        &self,
+        pre_spawn_ids: &[String],
+        states: &[WindowState],
+    ) -> Result<()>;
 }

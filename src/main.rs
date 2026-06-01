@@ -202,14 +202,13 @@ async fn main() -> Result<()> {
                 } else if let Some(windows_adapter) = adapter
                     .as_any_mut()
                     .downcast_mut::<adapters::windows::WindowsAdapter>(
-                )
-                    && let Some(window_id) = windows_adapter
-                        .find_window_with_heuristics(&cli.app)
-                        .await?
-                    {
-                        zummon_debug!("Heuristics (Windows) found window!");
-                        found_window = Some(window_id);
-                    }
+                ) && let Some(window_id) = windows_adapter
+                    .find_window_with_heuristics(&cli.app)
+                    .await?
+                {
+                    zummon_debug!("Heuristics (Windows) found window!");
+                    found_window = Some(window_id);
+                }
             }
         }
 
@@ -296,14 +295,15 @@ async fn rotate_log_if_needed(path: &Path) -> Result<()> {
     const MAX_FILES: usize = 5;
 
     if let Ok(metadata) = tokio::fs::metadata(path).await
-        && metadata.len() > MAX_SIZE {
-            for i in (1..MAX_FILES).rev() {
-                let old = format!("{}.{}", path.display(), i);
-                let new = format!("{}.{}", path.display(), i + 1);
-                let _ = tokio::fs::rename(&old, &new).await;
-            }
-            let _ = tokio::fs::rename(path, format!("{}.1", path.display())).await;
+        && metadata.len() > MAX_SIZE
+    {
+        for i in (1..MAX_FILES).rev() {
+            let old = format!("{}.{}", path.display(), i);
+            let new = format!("{}.{}", path.display(), i + 1);
+            let _ = tokio::fs::rename(&old, &new).await;
         }
+        let _ = tokio::fs::rename(path, format!("{}.1", path.display())).await;
+    }
 
     Ok(())
 }

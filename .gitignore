@@ -17,3 +17,5 @@ Thumbs.db
 
 # Log files
 *.log
+
+*.orig

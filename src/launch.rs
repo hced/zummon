@@ -105,17 +105,16 @@ async fn build_tui_command(cli: &Cli, app: &str, extra_args: &[String]) -> Resul
         }
     }
 
-    if cfg!(target_os = "macos")
-        && (terminal_cmd == "iTerm" || terminal_cmd == "Terminal") {
-            let script = format!(
-                "tell application \"{}\" to activate\ntell application \"{}\" to do script \"{} {}\"",
-                terminal_cmd,
-                terminal_cmd,
-                app,
-                extra_args.join(" ")
-            );
-            return Ok(format!("osascript -e '{}'", script));
-        }
+    if cfg!(target_os = "macos") && (terminal_cmd == "iTerm" || terminal_cmd == "Terminal") {
+        let script = format!(
+            "tell application \"{}\" to activate\ntell application \"{}\" to do script \"{} {}\"",
+            terminal_cmd,
+            terminal_cmd,
+            app,
+            extra_args.join(" ")
+        );
+        return Ok(format!("osascript -e '{}'", script));
+    }
 
     // Linux/Unix terminal building
     let mut terminal_cmd = terminal_cmd.clone();
