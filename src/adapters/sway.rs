@@ -1,13 +1,13 @@
 // src/adapters/sway.rs - Sway window system implementation
-use anyhow::{Result, Context, anyhow};
-use async_trait::async_trait;
-use serde::{Deserialize, Serialize};
-use tokio::process::Command;
 use crate::cli::WindowStateFlag;
 use crate::traits::{Adapter, WindowState};
 use crate::zummon_debug;
+use anyhow::{Context, Result, anyhow};
+use async_trait::async_trait;
+use serde::{Deserialize, Serialize};
 use std::process::Command as StdCommand;
 use std::process::Stdio;
+use tokio::process::Command;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SwayNode {
@@ -53,10 +53,7 @@ impl SwayAdapter {
     }
 
     async fn swaymsg(&self, args: &[&str]) -> Result<String> {
-        let output = Command::new("swaymsg")
-            .args(args)
-            .output()
-            .await?;
+        let output = Command::new("swaymsg").args(args).output().await?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
@@ -72,11 +69,10 @@ impl SwayAdapter {
     }
 
     fn find_windows(&self, node: &SwayNode, windows: &mut Vec<SwayNode>) {
-        if node.node_type == "con" || node.node_type == "floating_con" {
-            if node.app_id.is_some() || node.window_properties.is_some() {
+        if (node.node_type == "con" || node.node_type == "floating_con")
+            && (node.app_id.is_some() || node.window_properties.is_some()) {
                 windows.push(node.clone());
             }
-        }
 
         for child in &node.nodes {
             self.find_windows(child, windows);
@@ -95,9 +91,10 @@ impl SwayAdapter {
 
     fn get_window_app_id(&self, window: &SwayNode) -> Option<String> {
         window.app_id.clone().or_else(|| {
-            window.window_properties.as_ref().and_then(|wp| {
-                wp.class.clone().or_else(|| wp.instance.clone())
-            })
+            window
+                .window_properties
+                .as_ref()
+                .and_then(|wp| wp.class.clone().or_else(|| wp.instance.clone()))
         })
     }
 
@@ -106,7 +103,11 @@ impl SwayAdapter {
     }
 
     fn get_window_state_category(&self, window: &SwayNode) -> WindowState {
-        let is_floating = window.floating.as_ref().map(|f| f != "none").unwrap_or(false);
+        let is_floating = window
+            .floating
+            .as_ref()
+            .map(|f| f != "none")
+            .unwrap_or(false);
 
         if is_floating {
             return WindowState::Floating;
@@ -139,9 +140,12 @@ impl SwayAdapter {
             for window in &post_windows {
                 let window_id = self.get_window_id(window);
                 if !pre_ids.contains(&window_id) {
-                    zummon_debug!("New window detected after {}ms: id={}, app_id={:?}",
-                           attempt * interval_ms, window_id, self.get_window_app_id(window));
-
+                    zummon_debug!(
+                        "New window detected after {}ms: id={}, app_id={:?}",
+                        attempt * interval_ms,
+                        window_id,
+                        self.get_window_app_id(window)
+                    );
                     return Ok(self.get_window_app_id(window));
                 }
             }
@@ -153,7 +157,10 @@ impl SwayAdapter {
 
     pub async fn find_window_with_heuristics(&self, binary: &str) -> Result<Option<String>> {
         let windows = self.get_all_windows().await?;
-        let candidates: Vec<String> = windows.iter().filter_map(|w| self.get_window_app_id(w)).collect();
+        let candidates: Vec<String> = windows
+            .iter()
+            .filter_map(|w| self.get_window_app_id(w))
+            .collect();
 
         if candidates.is_empty() {
             return Ok(None);
@@ -169,11 +176,11 @@ impl SwayAdapter {
 
         let mut best_match = None;
         let mut best_score = 0.0;
+        let engine = pas_fuzzy_search::PasFuzzySearch::new(binary_name.to_lowercase());
 
         for candidate in &candidates {
-            let cand_lower = candidate.to_lowercase();
             for variant in &variants {
-                let score = jaro_winkler::jaro_winkler(variant, &cand_lower);
+                let score = engine.score(variant);
                 if score > best_score {
                     best_score = score;
                     best_match = Some((candidate.clone(), score));
@@ -182,7 +189,7 @@ impl SwayAdapter {
         }
 
         if let Some((app_id, score)) = best_match {
-            zummon_debug!("Best Jaro-Winkler match: '{}' with score {:.3}", app_id, score);
+            zummon_debug!("Best fuzzy match: '{}' with score {:.3}", &app_id, score);
             if score >= 0.6 {
                 self.find_window(&app_id).await
             } else {
@@ -206,10 +213,8 @@ impl Adapter for SwayAdapter {
         let app_id_lower = app_id.to_lowercase();
 
         if tracing::enabled!(tracing::Level::DEBUG) {
-            let available_ids: Vec<Option<String>> = windows
-                .iter()
-                .map(|w| self.get_window_app_id(w))
-                .collect();
+            let available_ids: Vec<Option<String>> =
+                windows.iter().map(|w| self.get_window_app_id(w)).collect();
             zummon_debug!("Available app_ids: {:?}", available_ids);
         }
 
@@ -220,7 +225,7 @@ impl Adapter for SwayAdapter {
                     .map(|id| id.to_lowercase().ends_with(&app_id_lower))
                     .unwrap_or(false)
             })
-            .last();
+            .next_back();
 
         Ok(matching.map(|w| self.get_window_id(w)))
     }
@@ -267,7 +272,7 @@ impl Adapter for SwayAdapter {
     }
 
     async fn validate_states(&self, states: Vec<WindowStateFlag>) -> Result<Vec<WindowState>> {
-        let supported = vec!["fullscreen", "maximize-edges", "floating"];
+        let supported = ["fullscreen", "maximize-edges", "floating"];
         Ok(states
             .iter()
             .filter_map(|s| {
@@ -324,7 +329,11 @@ impl Adapter for SwayAdapter {
         Ok(())
     }
 
-    async fn apply_window_state(&self, pre_spawn_ids: &[String], states: &[WindowState]) -> Result<()> {
+    async fn apply_window_state(
+        &self,
+        pre_spawn_ids: &[String],
+        states: &[WindowState],
+    ) -> Result<()> {
         let timeout_ms = 3000;
         let interval_ms = 100;
         let max_attempts = timeout_ms / interval_ms;
@@ -344,7 +353,11 @@ impl Adapter for SwayAdapter {
             }
         }
 
-        tracing::warn!("[zummon {}] Timed out waiting for new window after {}ms", env!("CARGO_PKG_VERSION"), timeout_ms);
+        tracing::warn!(
+            "[zummon {}] Timed out waiting for new window after {}ms",
+            env!("CARGO_PKG_VERSION"),
+            timeout_ms
+        );
         Ok(())
     }
 }

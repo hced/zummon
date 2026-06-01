@@ -1,13 +1,13 @@
 // src/adapters/windows.rs - Windows window system implementation
-use anyhow::Result;
-use async_trait::async_trait;
-use serde::Deserialize;
 use crate::cli::WindowStateFlag;
 use crate::traits::{Adapter, WindowState};
 use crate::zummon_debug;
+use anyhow::Result;
+use async_trait::async_trait;
+use serde::Deserialize;
+use std::path::Path;
 use std::process::Command as StdCommand;
 use std::process::Stdio;
-use std::path::Path;
 
 pub struct WindowsAdapter;
 
@@ -23,46 +23,48 @@ impl WindowsAdapter {
 
     async fn get_windows_powershell(&self) -> Result<Vec<WindowsWindow>> {
         let script = r#"
-            Add-Type @"
-            using System;
-            using System.Runtime.InteropServices;
-            using System.Text;
-            public class Win32Window {
-                [DllImport("user32.dll")] public static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
-                [DllImport("user32.dll")] public static extern int GetWindowText(IntPtr hWnd, StringBuilder text, int count);
-                [DllImport("user32.dll")] public static extern int GetWindowTextLength(IntPtr hWnd);
-                [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr hWnd);
-                [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
-                public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
-            }
+Add-Type @"
+using System;
+using System.Runtime.InteropServices;
+using System.Text;
+public class Win32Window {
+    [DllImport("user32.dll")] public static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
+    [DllImport("user32.dll")] public static extern int GetWindowText(IntPtr hWnd, StringBuilder text, int count);
+    [DllImport("user32.dll")] public static extern int GetWindowTextLength(IntPtr hWnd);
+    [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr hWnd);
+    [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
+    public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
+}
 "@
-            $windows = @()
-            $callback = {
-                param($hwnd, $lParam)
-                if ([Win32Window]::IsWindowVisible($hwnd)) {
-                    $length = [Win32Window]::GetWindowTextLength($hwnd)
-                    $sb = New-Object System.Text.StringBuilder($length + 1)
-                    [Win32Window]::GetWindowText($hwnd, $sb, $sb.Capacity) | Out-Null
-                    $title = $sb.ToString()
-                    if ($title -ne "" -and $title.Length -gt 0) {
-                        $pid = 0
-                        [Win32Window]::GetWindowThreadProcessId($hwnd, [ref]$pid) | Out-Null
-                        $proc = Get-Process -Id $pid -ErrorAction SilentlyContinue
-                        $appId = if ($proc) { $proc.ProcessName } else { "" }
-                        $windows += @{
-                            id = $hwnd.ToString()
-                            title = $title
-                            app_id = $appId
-                            pid = $pid
-                        }
-                    }
-                }
-                return $true
+$windows = @()
+$callback = {
+    param($hwnd, $lParam)
+    if ([Win32Window]::IsWindowVisible($hwnd)) {
+        $length = [Win32Window]::GetWindowTextLength($hwnd)
+        if ($length -eq 0) { return $true }
+        $sb = New-Object System.Text.StringBuilder($length + 1)
+        $result = [Win32Window]::GetWindowText($hwnd, $sb, $sb.Capacity)
+        if ($result -eq 0) { return $true }
+        $title = $sb.ToString()
+        if ($title -ne "" -and $title.Length -gt 0) {
+            $pid = 0
+            [Win32Window]::GetWindowThreadProcessId($hwnd, [ref]$pid) | Out-Null
+            $proc = Get-Process -Id $pid -ErrorAction SilentlyContinue
+            $appId = if ($proc) { $proc.ProcessName } else { "" }
+            $windows += @{
+                id = $hwnd.ToString()
+                title = $title
+                app_id = $appId
+                pid = $pid
             }
-            $delegate = [Win32Window+EnumWindowsProc]$callback
-            [Win32Window]::EnumWindows($delegate, [IntPtr]::Zero) | Out-Null
-            $windows | ConvertTo-Json -Compress
-        "#;
+        }
+    }
+    return $true
+}
+$delegate = [Win32Window+EnumWindowsProc]$callback
+[Win32Window]::EnumWindows($delegate, [IntPtr]::Zero) | Out-Null
+$windows | ConvertTo-Json -Compress
+"#;
 
         let output = StdCommand::new("powershell")
             .args(["-Command", script])
@@ -86,12 +88,15 @@ impl WindowsAdapter {
         }
 
         let windows: Vec<PsWindow> = serde_json::from_str(&stdout)?;
-        Ok(windows.into_iter().map(|w| WindowsWindow {
-            id: w.id,
-            app_id: w.app_id,
-            title: w.title,
-            pid: w.pid,
-        }).collect())
+        Ok(windows
+            .into_iter()
+            .map(|w| WindowsWindow {
+                id: w.id,
+                app_id: w.app_id,
+                title: w.title,
+                pid: w.pid,
+            })
+            .collect())
     }
 
     pub async fn find_window_with_heuristics(&self, binary: &str) -> Result<Option<String>> {
@@ -112,11 +117,11 @@ impl WindowsAdapter {
 
         let mut best_match = None;
         let mut best_score = 0.0;
+        let engine = pas_fuzzy_search::PasFuzzySearch::new(binary_name.to_lowercase());
 
         for candidate in candidates {
-            let cand_lower = candidate.to_lowercase();
             for variant in &variants {
-                let score = jaro_winkler::jaro_winkler(variant, &cand_lower);
+                let score = engine.score(variant);
                 if score > best_score {
                     best_score = score;
                     best_match = Some((candidate.clone(), score));
@@ -125,7 +130,7 @@ impl WindowsAdapter {
         }
 
         if let Some((app_id, score)) = best_match {
-            zummon_debug!("Best Jaro-Winkler match: '{}' with score {:.3}", app_id, score);
+            zummon_debug!("Best fuzzy match: '{}' with score {:.3}", &app_id, score);
             if score >= 0.6 {
                 self.find_window(&app_id).await
             } else {
@@ -159,26 +164,24 @@ impl Adapter for WindowsAdapter {
         }
 
         let matching = windows
-            .iter()
-            .filter(|w| w.app_id.to_lowercase().ends_with(&app_id_lower))
-            .last();
+            .iter().rfind(|w| w.app_id.to_lowercase().ends_with(&app_id_lower));
 
         Ok(matching.map(|w| w.id.clone()))
     }
 
     async fn get_focused_window(&self) -> Result<Option<String>> {
         let script = r#"
-            Add-Type @"
-            using System;
-            using System.Runtime.InteropServices;
-            public class Win32 {
-                [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
-                [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
-            }
+Add-Type @"
+using System;
+using System.Runtime.InteropServices;
+public class Win32 {
+    [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+    [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
+}
 "@
-            $hwnd = [Win32]::GetForegroundWindow()
-            $hwnd.ToString()
-        "#;
+$hwnd = [Win32]::GetForegroundWindow()
+$hwnd.ToString()
+"#;
 
         let output = StdCommand::new("powershell")
             .args(["-Command", script])
@@ -195,18 +198,18 @@ impl Adapter for WindowsAdapter {
     async fn focus_window(&self, window_id: &str) -> Result<()> {
         let script = format!(
             r#"
-            Add-Type @"
-            using System;
-            using System.Runtime.InteropServices;
-            public class Win32 {{
-                [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
-                [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
-            }}
+Add-Type @"
+using System;
+using System.Runtime.InteropServices;
+public class Win32 {{
+    [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
+    [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+}}
 "@
-            $hwnd = [IntPtr]::new({0})
-            [Win32]::ShowWindow($hwnd, 9) | Out-Null
-            [Win32]::SetForegroundWindow($hwnd) | Out-Null
-            "#,
+$hwnd = [IntPtr]::new({0})
+[Win32]::ShowWindow($hwnd, 9) | Out-Null
+[Win32]::SetForegroundWindow($hwnd) | Out-Null
+"#,
             window_id
         );
 
@@ -238,7 +241,7 @@ impl Adapter for WindowsAdapter {
     }
 
     async fn validate_states(&self, states: Vec<WindowStateFlag>) -> Result<Vec<WindowState>> {
-        let supported = vec!["fullscreen", "maximize-edges"];
+        let supported = ["fullscreen", "maximize-edges"];
         Ok(states
             .iter()
             .filter_map(|s| {
@@ -256,11 +259,19 @@ impl Adapter for WindowsAdapter {
             .collect())
     }
 
-    async fn apply_states_to_window(&self, _window_id: &str, _states: &[WindowState]) -> Result<()> {
+    async fn apply_states_to_window(
+        &self,
+        _window_id: &str,
+        _states: &[WindowState],
+    ) -> Result<()> {
         Ok(())
     }
 
-    async fn apply_window_state(&self, _pre_spawn_ids: &[String], _states: &[WindowState]) -> Result<()> {
+    async fn apply_window_state(
+        &self,
+        _pre_spawn_ids: &[String],
+        _states: &[WindowState],
+    ) -> Result<()> {
         Ok(())
     }
 }

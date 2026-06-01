@@ -135,9 +135,7 @@ impl Adapter for KwinAdapter {
         }
 
         let matching = windows
-            .iter()
-            .filter(|w| w.app_id.to_lowercase().ends_with(&app_id_lower))
-            .last();
+            .iter().rfind(|w| w.app_id.to_lowercase().ends_with(&app_id_lower));
 
         Ok(matching.map(|w| w.id.clone()))
     }
@@ -181,7 +179,7 @@ impl Adapter for KwinAdapter {
     }
 
     async fn validate_states(&self, states: Vec<WindowStateFlag>) -> Result<Vec<WindowState>> {
-        let supported = vec!["fullscreen", "maximize-edges", "floating"];
+        let supported = ["fullscreen", "maximize-edges", "floating"];
         Ok(states
             .iter()
             .filter_map(|s| {

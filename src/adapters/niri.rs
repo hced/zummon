@@ -1,13 +1,13 @@
 // src/adapters/niri.rs - Niri window system implementation
-use anyhow::{Result, Context, anyhow};
-use async_trait::async_trait;
-use serde::{Deserialize, Serialize};
-use tokio::process::Command;
 use crate::cli::WindowStateFlag;
 use crate::traits::{Adapter, WindowState};
 use crate::zummon_debug;
+use anyhow::{Context, Result, anyhow};
+use async_trait::async_trait;
+use serde::{Deserialize, Serialize};
 use std::process::Command as StdCommand;
 use std::process::Stdio;
+use tokio::process::Command;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NiriWindow {
@@ -40,11 +40,7 @@ impl NiriAdapter {
     }
 
     async fn niri_msg(&self, args: &[&str]) -> Result<String> {
-        let output = Command::new("niri")
-            .arg("msg")
-            .args(args)
-            .output()
-            .await?;
+        let output = Command::new("niri").arg("msg").args(args).output().await?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
@@ -81,13 +77,18 @@ impl NiriAdapter {
         Ok((1920, 1080))
     }
 
-    fn get_window_state_category(&self, window: &NiriWindow, screen_w: u32, screen_h: u32) -> WindowState {
+    fn get_window_state_category(
+        &self,
+        window: &NiriWindow,
+        screen_w: u32,
+        screen_h: u32,
+    ) -> WindowState {
         if window.is_floating {
             return WindowState::Floating;
         }
 
-        if let Some(layout) = &window.layout {
-            if let Some(size) = layout.window_size {
+        if let Some(layout) = &window.layout
+            && let Some(size) = layout.window_size {
                 let win_w = size[0];
                 let win_h = size[1];
 
@@ -103,7 +104,6 @@ impl NiriAdapter {
                     return WindowState::MaximizeEdges;
                 }
             }
-        }
 
         WindowState::Floating
     }
@@ -133,8 +133,12 @@ impl NiriAdapter {
 
             for window in &post_windows {
                 if !pre_window_ids.contains(&window.id.to_string()) {
-                    zummon_debug!("New window detected after {}ms: id={}, app_id={:?}",
-                           attempt * interval_ms, window.id, window.app_id);
+                    zummon_debug!(
+                        "New window detected after {}ms: id={}, app_id={:?}",
+                        attempt * interval_ms,
+                        window.id,
+                        window.app_id
+                    );
 
                     if let Some(app_id) = &window.app_id {
                         return Ok(Some(app_id.clone()));
@@ -159,10 +163,8 @@ impl Adapter for NiriAdapter {
         let app_id_lower = app_id.to_lowercase();
 
         if tracing::enabled!(tracing::Level::DEBUG) {
-            let available_ids: Vec<String> = windows
-                .iter()
-                .filter_map(|w| w.app_id.clone())
-                .collect();
+            let available_ids: Vec<String> =
+                windows.iter().filter_map(|w| w.app_id.clone()).collect();
             zummon_debug!("Available app_ids: {:?}", available_ids);
         }
 
@@ -174,7 +176,7 @@ impl Adapter for NiriAdapter {
                     .map(|id| id.to_lowercase().ends_with(&app_id_lower))
                     .unwrap_or(false)
             })
-            .last();
+            .next_back();
 
         Ok(matching.map(|w| w.id.to_string()))
     }
@@ -188,27 +190,51 @@ impl Adapter for NiriAdapter {
     }
 
     async fn focus_window(&self, window_id: &str) -> Result<()> {
-        self.niri_msg(&["action", "focus-window", "--id", window_id]).await?;
+        self.niri_msg(&["action", "focus-window", "--id", window_id])
+            .await?;
         Ok(())
     }
 
     async fn spawn_command_string(&mut self, cmd_str: &str) -> Result<()> {
-        let niri_cmd = format!("niri msg action spawn -- {}", cmd_str);
-        zummon_debug!("Executing: {}", niri_cmd);
+        zummon_debug!("Executing: {}", cmd_str);
 
-        let child = StdCommand::new("sh")
-            .arg("-c")
-            .arg(&niri_cmd)
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
-            .context("Failed to spawn niri command")?;
+        // AppImages often fail via Niri IPC spawn due to stripped FUSE/session environment.
+        // Launch them directly to inherit your full user session (FUSE, D-Bus, etc.).
+        let is_appimage = cmd_str.contains(".AppImage") || cmd_str.contains(".appimage");
 
-        let pid = child.id();
-        zummon_debug!("Spawned with PID: {}", pid);
+        if is_appimage {
+            zummon_debug!(
+                "AppImage detected: launching directly via std::process to preserve environment"
+            );
+            let child = StdCommand::new("sh")
+                .arg("-c")
+                .arg(cmd_str)
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+                .context("Failed to spawn AppImage directly")?;
 
-        std::mem::forget(child);
+            zummon_debug!("Spawned AppImage with PID: {}", child.id());
+            std::mem::forget(child);
+        } else {
+            // Standard binaries: use Niri IPC spawn for better compositor integration
+            let niri_cmd = format!("niri msg action spawn -- {}", cmd_str);
+            zummon_debug!("Executing: {}", niri_cmd);
+
+            let child = StdCommand::new("sh")
+                .arg("-c")
+                .arg(&niri_cmd)
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+                .context("Failed to spawn niri command")?;
+
+            let pid = child.id();
+            zummon_debug!("Spawned with PID: {}", pid);
+            std::mem::forget(child);
+        }
 
         zummon_debug!("Spawn command executed successfully");
         Ok(())
@@ -220,7 +246,7 @@ impl Adapter for NiriAdapter {
     }
 
     async fn validate_states(&self, states: Vec<WindowStateFlag>) -> Result<Vec<WindowState>> {
-        let supported = vec!["fullscreen", "maximize-edges", "floating"];
+        let supported = ["fullscreen", "maximize-edges", "floating"];
         Ok(states
             .iter()
             .filter_map(|s| {
@@ -249,12 +275,19 @@ impl Adapter for NiriAdapter {
         let (screen_w, screen_h) = self.get_screen_dimensions().await?;
         let current_category = self.get_window_state_category(window, screen_w, screen_h);
 
-        if let Some(layout) = &window.layout {
-            if let Some(size) = layout.window_size {
-                zummon_debug!("Window {} current: category={:?}, size={}x{}, floating={}, screen={}x{}",
-                       window_id, current_category, size[0], size[1], window.is_floating, screen_w, screen_h);
+        if let Some(layout) = &window.layout
+            && let Some(size) = layout.window_size {
+                zummon_debug!(
+                    "Window {} current: category={:?}, size={}x{}, floating={}, screen={}x{}",
+                    window_id,
+                    current_category,
+                    size[0],
+                    size[1],
+                    window.is_floating,
+                    screen_w,
+                    screen_h
+                );
             }
-        }
 
         for state in states {
             let should_apply = match state {
@@ -271,13 +304,16 @@ impl Adapter for NiriAdapter {
             if should_apply {
                 match state {
                     WindowState::Fullscreen => {
-                        self.niri_msg(&["action", "fullscreen-window", "--id", window_id]).await?;
+                        self.niri_msg(&["action", "fullscreen-window", "--id", window_id])
+                            .await?;
                     }
                     WindowState::MaximizeEdges => {
-                        self.niri_msg(&["action", "maximize-window-to-edges", "--id", window_id]).await?;
+                        self.niri_msg(&["action", "maximize-window-to-edges", "--id", window_id])
+                            .await?;
                     }
                     WindowState::Floating => {
-                        self.niri_msg(&["action", "move-window-to-floating", "--id", window_id]).await?;
+                        self.niri_msg(&["action", "move-window-to-floating", "--id", window_id])
+                            .await?;
                     }
                 }
                 tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
@@ -287,7 +323,11 @@ impl Adapter for NiriAdapter {
         Ok(())
     }
 
-    async fn apply_window_state(&self, pre_spawn_ids: &[String], states: &[WindowState]) -> Result<()> {
+    async fn apply_window_state(
+        &self,
+        pre_spawn_ids: &[String],
+        states: &[WindowState],
+    ) -> Result<()> {
         let timeout_ms = 3000;
         let interval_ms = 100;
         let max_attempts = timeout_ms / interval_ms;
@@ -307,7 +347,11 @@ impl Adapter for NiriAdapter {
             }
         }
 
-        tracing::warn!("[zummon {}] Timed out waiting for new window after {}ms", env!("CARGO_PKG_VERSION"), timeout_ms);
+        tracing::warn!(
+            "[zummon {}] Timed out waiting for new window after {}ms",
+            env!("CARGO_PKG_VERSION"),
+            timeout_ms
+        );
         Ok(())
     }
 }

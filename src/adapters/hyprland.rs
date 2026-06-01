@@ -1,13 +1,13 @@
 // src/adapters/hyprland.rs - Hyprland window system implementation
-use anyhow::{Result, Context, anyhow};
-use async_trait::async_trait;
-use serde::{Deserialize, Serialize};
-use tokio::process::Command;
 use crate::cli::WindowStateFlag;
 use crate::traits::{Adapter, WindowState};
 use crate::zummon_debug;
+use anyhow::{Context, Result, anyhow};
+use async_trait::async_trait;
+use serde::{Deserialize, Serialize};
 use std::process::Command as StdCommand;
 use std::process::Stdio;
+use tokio::process::Command;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HyprlandWindow {
@@ -55,10 +55,7 @@ impl HyprlandAdapter {
     }
 
     async fn hyprctl(&self, args: &[&str]) -> Result<String> {
-        let output = Command::new("hyprctl")
-            .args(args)
-            .output()
-            .await?;
+        let output = Command::new("hyprctl").args(args).output().await?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
@@ -122,9 +119,12 @@ impl HyprlandAdapter {
 
             for window in &post_windows {
                 if !pre_addresses.contains(&window.address) {
-                    zummon_debug!("New window detected after {}ms: address={}, class={}",
-                           attempt * interval_ms, window.address, window.class);
-
+                    zummon_debug!(
+                        "New window detected after {}ms: address={}, class={}",
+                        attempt * interval_ms,
+                        window.address,
+                        window.class
+                    );
                     return Ok(Some(window.class.clone()));
                 }
             }
@@ -152,11 +152,11 @@ impl HyprlandAdapter {
 
         let mut best_match = None;
         let mut best_score = 0.0;
+        let engine = pas_fuzzy_search::PasFuzzySearch::new(binary_name.to_lowercase());
 
         for candidate in candidates {
-            let cand_lower = candidate.to_lowercase();
             for variant in &variants {
-                let score = jaro_winkler::jaro_winkler(variant, &cand_lower);
+                let score = engine.score(variant);
                 if score > best_score {
                     best_score = score;
                     best_match = Some((candidate.clone(), score));
@@ -165,7 +165,7 @@ impl HyprlandAdapter {
         }
 
         if let Some((app_id, score)) = best_match {
-            zummon_debug!("Best Jaro-Winkler match: '{}' with score {:.3}", app_id, score);
+            zummon_debug!("Best fuzzy match: '{}' with score {:.3}", &app_id, score);
             if score >= 0.6 {
                 self.find_window(&app_id).await
             } else {
@@ -189,17 +189,12 @@ impl Adapter for HyprlandAdapter {
         let app_id_lower = app_id.to_lowercase();
 
         if tracing::enabled!(tracing::Level::DEBUG) {
-            let available_ids: Vec<String> = windows
-                .iter()
-                .map(|w| w.class.clone())
-                .collect();
+            let available_ids: Vec<String> = windows.iter().map(|w| w.class.clone()).collect();
             zummon_debug!("Available app_ids: {:?}", available_ids);
         }
 
         let matching = windows
-            .iter()
-            .filter(|w| w.class.to_lowercase().ends_with(&app_id_lower))
-            .last();
+            .iter().rfind(|w| w.class.to_lowercase().ends_with(&app_id_lower));
 
         Ok(matching.map(|w| w.address.clone()))
     }
@@ -209,7 +204,8 @@ impl Adapter for HyprlandAdapter {
     }
 
     async fn focus_window(&self, window_id: &str) -> Result<()> {
-        self.hyprctl(&["dispatch", "focuswindow", &format!("address:{}", window_id)]).await?;
+        self.hyprctl(&["dispatch", "focuswindow", &format!("address:{}", window_id)])
+            .await?;
         Ok(())
     }
 
@@ -241,7 +237,7 @@ impl Adapter for HyprlandAdapter {
     }
 
     async fn validate_states(&self, states: Vec<WindowStateFlag>) -> Result<Vec<WindowState>> {
-        let supported = vec!["fullscreen", "maximize-edges", "floating"];
+        let supported = ["fullscreen", "maximize-edges", "floating"];
         Ok(states
             .iter()
             .filter_map(|s| {
@@ -290,7 +286,12 @@ impl Adapter for HyprlandAdapter {
                         self.hyprctl(&["dispatch", "fullscreen", "2"]).await?;
                     }
                     WindowState::Floating => {
-                        self.hyprctl(&["dispatch", "togglefloating", &format!("address:{}", window_id)]).await?;
+                        self.hyprctl(&[
+                            "dispatch",
+                            "togglefloating",
+                            &format!("address:{}", window_id),
+                        ])
+                        .await?;
                     }
                 }
                 tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
@@ -299,7 +300,11 @@ impl Adapter for HyprlandAdapter {
         Ok(())
     }
 
-    async fn apply_window_state(&self, pre_spawn_ids: &[String], states: &[WindowState]) -> Result<()> {
+    async fn apply_window_state(
+        &self,
+        pre_spawn_ids: &[String],
+        states: &[WindowState],
+    ) -> Result<()> {
         let timeout_ms = 3000;
         let interval_ms = 100;
         let max_attempts = timeout_ms / interval_ms;
@@ -319,7 +324,11 @@ impl Adapter for HyprlandAdapter {
             }
         }
 
-        tracing::warn!("[zummon {}] Timed out waiting for new window after {}ms", env!("CARGO_PKG_VERSION"), timeout_ms);
+        tracing::warn!(
+            "[zummon {}] Timed out waiting for new window after {}ms",
+            env!("CARGO_PKG_VERSION"),
+            timeout_ms
+        );
         Ok(())
     }
 }

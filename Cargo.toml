@@ -1,6 +1,6 @@
 [package]
 name = "zummon"
-version = "0.1.0"
+version = "0.3.0"
 edition = "2024"
 description = "Summon an app to the foreground or launch it if not running – with heuristic window matching, latest version selection, and more"
 authors = ["H. Cederblad"]
@@ -17,9 +17,10 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 which = "8.0"
 semver = "1.0"
-glob = "0.3"
 regex = "1.12"
 async-trait = "0.1"
 shell-words = "1.1"
-jaro_winkler = "0.2.1"
 dirs = "6.0"
+sysinfo = "0.38.4"
+wax = "0.7.0"
+pas-fuzzy-search = "0.0.1"

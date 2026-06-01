@@ -1,15 +1,15 @@
 // src/adapters/macos.rs - macOS window system implementation
-use anyhow::{Result, Context, anyhow};
-use async_trait::async_trait;
-use serde::{Deserialize, Serialize};
-use tokio::process::Command;
 use crate::cli::WindowStateFlag;
+use crate::focus;
 use crate::traits::{Adapter, WindowState};
 use crate::zummon_debug;
+use anyhow::{Context, Result, anyhow};
+use async_trait::async_trait;
+use serde::{Deserialize, Serialize};
+use std::path::Path;
 use std::process::Command as StdCommand;
 use std::process::Stdio;
-use std::path::Path;
-use crate::focus;
+use tokio::process::Command;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MacOSWindow {
@@ -24,10 +24,7 @@ pub struct MacOSAdapter;
 
 impl MacOSAdapter {
     pub async fn new() -> Result<Self> {
-        let output = Command::new("which")
-            .arg("osascript")
-            .output()
-            .await?;
+        let output = Command::new("which").arg("osascript").output().await?;
 
         if !output.status.success() {
             return Err(anyhow!("osascript not found"));
@@ -52,27 +49,30 @@ impl MacOSAdapter {
 
     async fn get_windows_applescript(&self) -> Result<Vec<MacOSWindow>> {
         let script = r#"
-            set output to ""
-            tell application "System Events"
-                repeat with proc in (every process whose background only is false)
-                    set procName to name of proc
-                    set procPid to unix id of proc
-                    set isFront to frontmost of proc
-                    repeat with win in (every window of proc)
-                        set winTitle to name of win
-                        set winId to id of win
-                        set output to output & procName & "|" & winId & "|" & winTitle & "|" & isFront & "|" & procPid & "\n"
-                    end repeat
-                end repeat
-            end tell
-            return output
-        "#;
+set output to ""
+tell application "System Events"
+    repeat with proc in (every process whose background only is false)
+        set procName to name of proc
+        set procPid to unix id of proc
+        set isFront to frontmost of proc
+        repeat with win in (every window of proc)
+            set winTitle to name of win
+            set winId to id of win
+            set output to output & procName & "|" & winId & "|" & winTitle & "|" & isFront & "|" & procPid & "
+"
+        end repeat
+    end repeat
+end tell
+return output
+"#;
 
         let output = self.osascript(script).await?;
         let mut windows = Vec::new();
 
         for line in output.lines() {
-            if line.is_empty() { continue; }
+            if line.is_empty() {
+                continue;
+            }
             let parts: Vec<&str> = line.split('|').collect();
             if parts.len() == 5 {
                 windows.push(MacOSWindow {
@@ -111,11 +111,11 @@ impl MacOSAdapter {
 
         let mut best_match = None;
         let mut best_score = 0.0;
+        let engine = pas_fuzzy_search::PasFuzzySearch::new(binary_name.to_lowercase());
 
         for candidate in candidates {
-            let cand_lower = candidate.to_lowercase();
             for variant in &variants {
-                let score = jaro_winkler::jaro_winkler(variant, &cand_lower);
+                let score = engine.score(variant);
                 if score > best_score {
                     best_score = score;
                     best_match = Some((candidate.clone(), score));
@@ -124,7 +124,7 @@ impl MacOSAdapter {
         }
 
         if let Some((app_id, score)) = best_match {
-            zummon_debug!("Best Jaro-Winkler match: '{}' with score {:.3}", app_id, score);
+            zummon_debug!("Best fuzzy match: '{}' with score {:.3}", &app_id, score);
             if score >= 0.6 {
                 self.find_window(&app_id).await
             } else {
@@ -156,9 +156,12 @@ impl MacOSAdapter {
 
             for window in &post_windows {
                 if !pre_ids.contains(&window.id) {
-                    zummon_debug!("New window detected after {}ms: id={}, app_id={}",
-                           attempt * interval_ms, window.id, window.app_id);
-
+                    zummon_debug!(
+                        "New window detected after {}ms: id={}, app_id={}",
+                        attempt * interval_ms,
+                        window.id,
+                        window.app_id
+                    );
                     return Ok(Some(window.app_id.clone()));
                 }
             }
@@ -185,9 +188,7 @@ impl Adapter for MacOSAdapter {
         }
 
         let matching = windows
-            .iter()
-            .filter(|w| w.app_id.to_lowercase().ends_with(&app_id_lower))
-            .last();
+            .iter().rfind(|w| w.app_id.to_lowercase().ends_with(&app_id_lower));
 
         Ok(matching.map(|w| w.id.clone()))
     }
@@ -200,18 +201,18 @@ impl Adapter for MacOSAdapter {
     async fn focus_window(&self, window_id: &str) -> Result<()> {
         let script = format!(
             r#"
-            tell application "System Events"
-                repeat with proc in (every process)
-                    repeat with win in (every window of proc)
-                        if id of win is {} then
-                            set frontmost of proc to true
-                            tell proc to set index of win to 1
-                            return
-                        end if
-                    end repeat
-                end repeat
-            end tell
-            "#,
+tell application "System Events"
+    repeat with proc in (every process)
+        repeat with win in (every window of proc)
+            if id of win is {} then
+                set frontmost of proc to true
+                tell proc to set index of win to 1
+                return
+            end if
+        end repeat
+    end repeat
+end tell
+"#,
             window_id
         );
         self.osascript(&script).await?;
@@ -243,7 +244,7 @@ impl Adapter for MacOSAdapter {
     }
 
     async fn validate_states(&self, states: Vec<WindowStateFlag>) -> Result<Vec<WindowState>> {
-        let supported = vec!["fullscreen", "maximize-edges"];
+        let supported = ["fullscreen", "maximize-edges"];
         Ok(states
             .iter()
             .filter_map(|s| {
@@ -273,16 +274,16 @@ impl Adapter for MacOSAdapter {
                 WindowState::Fullscreen | WindowState::MaximizeEdges => {
                     let script = format!(
                         r#"
-                        tell application "System Events"
-                            repeat with proc in (every process)
-                                repeat with win in (every window of proc)
-                                    if id of win is {} then
-                                        tell proc to set zoomed of win to not (zoomed of win)
-                                    end if
-                                end repeat
-                            end repeat
-                        end tell
-                        "#,
+tell application "System Events"
+    repeat with proc in (every process)
+        repeat with win in (every window of proc)
+            if id of win is {} then
+                tell proc to set zoomed of win to not (zoomed of win)
+            end if
+        end repeat
+    end repeat
+end tell
+"#,
                         window_id
                     );
                     self.osascript(&script).await?;
@@ -294,7 +295,11 @@ impl Adapter for MacOSAdapter {
         Ok(())
     }
 
-    async fn apply_window_state(&self, pre_spawn_ids: &[String], states: &[WindowState]) -> Result<()> {
+    async fn apply_window_state(
+        &self,
+        pre_spawn_ids: &[String],
+        states: &[WindowState],
+    ) -> Result<()> {
         let timeout_ms = 3000;
         let interval_ms = 100;
         let max_attempts = timeout_ms / interval_ms;
@@ -314,7 +319,11 @@ impl Adapter for MacOSAdapter {
             }
         }
 
-        tracing::warn!("[zummon {}] Timed out waiting for new window after {}ms", env!("CARGO_PKG_VERSION"), timeout_ms);
+        tracing::warn!(
+            "[zummon {}] Timed out waiting for new window after {}ms",
+            env!("CARGO_PKG_VERSION"),
+            timeout_ms
+        );
         Ok(())
     }
 }

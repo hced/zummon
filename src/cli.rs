@@ -22,7 +22,8 @@ impl WindowStateFlag {
 }
 
 fn get_after_help() -> String {
-    format!("\
+    format!(
+        "\
 NAME
      zummon — summon an application to the foreground or launch it if not running
 
@@ -65,9 +66,10 @@ UNIVERSAL OPTIONS
      --bypass-adapter      Launch directly without window system integration
 
    Version Resolution:
-     --latest <PATH>       Resolve and launch the latest version from a directory.
+     --latest[=<PATH>]     Resolve and launch the latest version from a directory.
                            If omitted and the APP argument is a directory,
                            zummon will automatically resolve the latest version.
+                           Can be used as a bare flag to force resolution on APP.
      -m, --mod             Use modification time as version tiebreaker
 
 PLATFORM-SPECIFIC OPTIONS
@@ -125,7 +127,8 @@ EXIT STATUS
 
 AUTHOR
      H. Cederblad\n\nZummon {}",
-     env!("CARGO_PKG_VERSION"))
+        env!("CARGO_PKG_VERSION")
+    )
 }
 
 #[derive(Debug, Parser)]
@@ -174,7 +177,9 @@ pub struct Cli {
     #[arg(long)]
     pub class: Option<String>,
 
-    #[arg(long)]
+    /// Resolve and launch the latest version from a directory.
+    /// Accepts an optional path. If omitted, uses APP as the directory.
+    #[arg(long, num_args = 0..=1, default_missing_value = ".")]
     pub latest: Option<PathBuf>,
 
     #[arg(short = 'm', long)]
