@@ -1,32 +1,160 @@
-name: Build
-on: [push, workflow_dispatch]
+# .github/workflows/build.yml
+name: Build & Release
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
 env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: "-D warnings"
+
 jobs:
-  build:
-    strategy:
-      matrix:
-        include:
-          - os: ubuntu-latest
-            target: x86_64-unknown-linux-gnu
-            artifact: zummon-linux
-          - os: windows-latest
-            target: x86_64-pc-windows-msvc
-            artifact: zummon-windows.exe
-          - os: macos-latest
-            target: x86_64-apple-darwin
-            artifact: zummon-macos-intel
-          - os: macos-latest
-            target: aarch64-apple-darwin
-            artifact: zummon-macos-silicon
-    runs-on: ${{ matrix.os }}
+  # ─────────────────────────────────────────────────────────────
+  # Lint & Test (Linux runner, fast feedback)
+  # ─────────────────────────────────────────────────────────────
+  lint:
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Cache dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Run clippy
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+      - name: Run tests
+        run: cargo test --all-targets --all-features
+
+  # ─────────────────────────────────────────────────────────────
+  # Build Matrix (all platforms + targets)
+  # ─────────────────────────────────────────────────────────────
+  build:
+    needs: lint
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Linux
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            artifact_name: zummon-linux-x86_64
+            binary_name: zummon
+
+          # Windows
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            artifact_name: zummon-windows-x86_64
+            binary_name: zummon.exe
+
+          # macOS Intel
+          - os: macos-13 # Intel runner
+            target: x86_64-apple-darwin
+            artifact_name: zummon-macos-x86_64
+            binary_name: zummon
+
+          # macOS Apple Silicon
+          - os: macos-latest # ARM runner
+            target: aarch64-apple-darwin
+            artifact_name: zummon-macos-aarch64
+            binary_name: zummon
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
-      - run: cargo build --release --target ${{ matrix.target }}
-      - uses: actions/upload-artifact@v4
+
+      - name: Cache dependencies
+        uses: Swatinem/rust-cache@v2
         with:
-          name: ${{ matrix.artifact }}
-          path: target/${{ matrix.target }}/release/zummon${{ matrix.os == 'windows-latest' && '.exe' || '' }}
+          key: ${{ matrix.target }}
+
+      - name: Build release
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Prepare artifact directory
+        shell: bash
+        run: |
+          mkdir -p release
+          cp "target/${{ matrix.target }}/release/${{ matrix.binary_name }}" release/
+
+          # Add README and license for context
+          cp README.md LICENSE release/ 2>/dev/null || true
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: release/
+          retention-days: 30
+
+  # ─────────────────────────────────────────────────────────────
+  # Publish Release (only on tag push)
+  # ─────────────────────────────────────────────────────────────
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    permissions:
+      contents: write # Required to create releases and upload assets
+
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Generate checksums
+        working-directory: artifacts
+        run: |
+          for f in *; do
+            [ -f "$f" ] && sha256sum "$f" >> SHA256SUMS.txt
+          done
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            artifacts/*
+          generate_release_notes: true
+          draft: false
+          prerelease: ${{ contains(github.ref, 'alpha') || contains(github.ref, 'beta') || contains(github.ref, 'rc') }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # ─────────────────────────────────────────────────────────────
+  # Optional: Publish to crates.io (manual trigger only)
+  # ─────────────────────────────────────────────────────────────
+  publish-crates:
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    environment: crates-io # Requires environment protection in repo settings
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Publish to crates.io
+        run: cargo publish --token ${{ secrets.CARGO_REGISTRY_TOKEN }}
