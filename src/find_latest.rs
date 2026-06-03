@@ -39,7 +39,6 @@ pub async fn resolve_latest(
     } else {
         let mut parent = versioned_path.to_path_buf();
         let mut pattern = None;
-
         while let Some(p) = parent.parent() {
             if p.exists() {
                 let relative = versioned_path.strip_prefix(p).unwrap_or(versioned_path);
@@ -52,14 +51,12 @@ pub async fn resolve_latest(
             }
             parent = p.to_path_buf();
         }
-
         if !parent.exists() {
             return Err(anyhow!(
                 "Could not find valid parent directory in path: {}",
                 versioned_path.display()
             ));
         }
-
         (parent, pattern)
     };
 
@@ -68,6 +65,7 @@ pub async fn resolve_latest(
         search_dir.display(),
         dir_pattern
     );
+
     let pattern = dir_pattern.as_deref().unwrap_or(app_pattern);
 
     // PHASE 1: Wax glob patterns (deterministic, high-confidence)
@@ -164,6 +162,7 @@ pub async fn resolve_latest(
     if tracing::enabled!(tracing::Level::DEBUG) {
         log_all_executables(&search_dir, pattern).await;
     }
+
     Err(anyhow!(
         "No executable matching '{}' found in {} after exhaustive 4-phase search",
         pattern,
@@ -192,7 +191,6 @@ async fn phase1_wax_glob(
 
     for glob_str in &glob_patterns {
         zummon_debug!("[find_latest] PHASE 1: trying glob '{}'", glob_str);
-
         let glob = match Glob::new(glob_str) {
             Ok(g) => g,
             Err(e) => {
@@ -302,15 +300,13 @@ async fn phase2_fuzzy(
             if !is_executable(&path, &filename_lower).await {
                 continue;
             }
-
             let stem = extract_stem(&filename_lower);
             let score = engine.score(&stem);
             if score < 0.80 {
                 continue;
             }
-
             let scaled = (score * 100.0) as u32;
-            let version = extract_version(&filename);
+            let version = extract_version(&path);
             let mod_time = async_fs::metadata(&path)
                 .await
                 .ok()
@@ -336,6 +332,7 @@ async fn phase2_fuzzy(
         "[find_latest] PHASE 2: found {} fuzzy matches (score ≥ 80)",
         candidates.len()
     );
+
     candidates.sort_by(|a, b| sort_candidates(a, b, use_mod_time));
 
     if let Some(best) = candidates.first() {
@@ -375,7 +372,6 @@ async fn phase3_multi_tier_fuzzy(
             if !is_executable(&path, &filename_lower).await {
                 continue;
             }
-
             if let Some(c) = build_fuzzy_candidate(&path, &pattern_lower, 3).await {
                 candidates.push(c);
             }
@@ -419,6 +415,7 @@ async fn phase3_multi_tier_fuzzy(
     }
 
     candidates.sort_by(|a, b| sort_candidates(a, b, use_mod_time));
+
     if let Some(best) = candidates.first() {
         zummon_debug!(
             "[find_latest] PHASE 3 BEST GUESS (below threshold): {} (score={})",
@@ -434,13 +431,12 @@ async fn build_fuzzy_candidate(path: &Path, pattern: &str, phase: u8) -> Option<
     let filename = path.file_name()?.to_string_lossy();
     let filename_lower = filename.to_lowercase();
     let stem = extract_stem(&filename_lower);
-
     let (score, _tier) = compute_multi_tier_score(&stem, pattern);
     if score == 0 {
         return None;
     }
 
-    let version = extract_version(&filename);
+    let version = extract_version(path);
     let mod_time = async_fs::metadata(path)
         .await
         .ok()
@@ -488,6 +484,7 @@ fn compute_multi_tier_score(stem: &str, pattern: &str) -> (u32, u8) {
 
     let s_clean: String = s.chars().filter(|c| c.is_alphanumeric()).collect();
     let p_clean: String = p.chars().filter(|c| c.is_alphanumeric()).collect();
+
     if s_clean == p_clean {
         return (85, 3);
     }
@@ -547,7 +544,6 @@ async fn phase4_exhaustive_fallback(
             if !is_executable(&path, &filename_lower).await {
                 continue;
             }
-
             let stem = extract_stem(&filename_lower);
             let s_clean: String = stem.chars().filter(|c| c.is_alphanumeric()).collect();
             let score = (engine.score(&s_clean) * 100.0) as u32;
@@ -555,7 +551,7 @@ async fn phase4_exhaustive_fallback(
                 continue;
             }
 
-            let version = extract_version(&filename);
+            let version = extract_version(&path);
             let mod_time = async_fs::metadata(&path)
                 .await
                 .ok()
@@ -581,6 +577,7 @@ async fn phase4_exhaustive_fallback(
         "[find_latest] PHASE 4: found {} exhaustive candidates",
         candidates.len()
     );
+
     candidates.sort_by(|a, b| sort_candidates(a, b, use_mod_time));
 
     if let Some(best) = candidates.first() {
@@ -598,7 +595,6 @@ async fn phase4_exhaustive_fallback(
 async fn build_glob_candidate(path: &Path, pattern: &str) -> Option<Candidate> {
     let filename = path.file_name()?.to_string_lossy();
     let stem = extract_stem(&filename.to_lowercase());
-
     let base_score = if stem == pattern.to_lowercase() {
         100
     } else if stem.starts_with(pattern) || stem.ends_with(pattern) {
@@ -607,7 +603,7 @@ async fn build_glob_candidate(path: &Path, pattern: &str) -> Option<Candidate> {
         80
     };
 
-    let version = extract_version(&filename);
+    let version = extract_version(path);
     let mod_time = async_fs::metadata(path)
         .await
         .ok()
@@ -625,6 +621,13 @@ async fn build_glob_candidate(path: &Path, pattern: &str) -> Option<Candidate> {
 }
 
 async fn is_executable(path: &Path, _filename_lower: &str) -> bool {
+    // Explicitly reject shared libraries and static archives
+    if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+        if ["so", "dll", "dylib", "a", "lib", "o"].contains(&ext) {
+            return false;
+        }
+    }
+
     let exec_exts: &[&str] = if cfg!(windows) {
         &["exe", "bat", "cmd", "ps1", "msi"]
     } else if cfg!(target_os = "macos") {
@@ -646,6 +649,7 @@ async fn is_executable(path: &Path, _filename_lower: &str) -> bool {
             return metadata.permissions().mode() & 0o111 != 0;
         }
     }
+
     false
 }
 
@@ -668,6 +672,7 @@ fn extract_stem(filename_lower: &str) -> String {
         ".tar.bz2",
         ".zip",
     ];
+
     let mut stem = filename_lower.to_string();
     for ext in extensions {
         if stem.ends_with(ext) {
@@ -675,13 +680,35 @@ fn extract_stem(filename_lower: &str) -> String {
             break;
         }
     }
+
     stem
 }
 
-fn extract_version(s: &str) -> Option<Version> {
+/// Extracts version from binary path. Checks parent directory first (extracted tarballs),
+/// then falls back to filename (AppImages/flat binaries).
+fn extract_version(path: &Path) -> Option<Version> {
     use regex::Regex;
-    let re = Regex::new(r"(\d+\.\d+(?:\.\d+)*(?:-\d+)?)").ok()?;
-    re.find(s).and_then(|m| Version::parse(m.as_str()).ok())
+    let re = Regex::new(r"(\d+\.\d+(?:\.\d+)?)").ok()?;
+
+    // 1. Check parent directory name first
+    if let Some(parent) = path.parent() {
+        if let Some(dir_name) = parent.file_name() {
+            let s = dir_name.to_string_lossy();
+            if let Some(m) = re.find(&s) {
+                return Version::parse(m.as_str()).ok();
+            }
+        }
+    }
+
+    // 2. Fallback to filename
+    if let Some(file_name) = path.file_name() {
+        let s = file_name.to_string_lossy();
+        if let Some(m) = re.find(&s) {
+            return Version::parse(m.as_str()).ok();
+        }
+    }
+
+    None
 }
 
 fn sort_candidates(a: &Candidate, b: &Candidate, use_mod_time: bool) -> std::cmp::Ordering {
@@ -734,7 +761,7 @@ async fn log_all_executables(search_dir: &Path, _pattern: &str) {
             }
             let filename = path.file_name().unwrap_or_default().to_string_lossy();
             let stem = extract_stem(&filename.to_lowercase());
-            let version = extract_version(&filename);
+            let version = extract_version(&path);
             zummon_debug!(
                 "[find_latest]   file: '{}' stem='{}' ver={:?}",
                 filename,
