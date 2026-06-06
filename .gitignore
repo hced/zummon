@@ -1,5 +1,4 @@
 # Typical project-based cruft
-/target
 ISSUES.md
 *.orig
 
@@ -8,6 +7,7 @@ ISSUES.md
 
 # Rust build artifacts
 /target/
+/debug/
 
 # IDE cruft
 .vscode/
