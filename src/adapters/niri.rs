@@ -41,12 +41,10 @@ impl NiriAdapter {
 
     async fn niri_msg(&self, args: &[&str]) -> Result<String> {
         let output = Command::new("niri").arg("msg").args(args).output().await?;
-
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
             return Err(anyhow!("niri msg failed: {}", stderr));
         }
-
         Ok(String::from_utf8_lossy(&output.stdout).to_string())
     }
 
@@ -86,26 +84,21 @@ impl NiriAdapter {
         if window.is_floating {
             return WindowState::Floating;
         }
-
         if let Some(layout) = &window.layout
             && let Some(size) = layout.window_size
         {
             let win_w = size[0];
             let win_h = size[1];
-
             let w_diff = (screen_w as i32 - win_w as i32).abs();
             let h_diff = (screen_h as i32 - win_h as i32).abs();
-
             if w_diff <= 8 && h_diff <= 8 {
                 return WindowState::Fullscreen;
             }
-
             let h_tolerance = (screen_h as f32 * 0.05) as i32;
             if w_diff <= 100 && h_diff <= h_tolerance {
                 return WindowState::MaximizeEdges;
             }
         }
-
         WindowState::Floating
     }
 
@@ -118,20 +111,14 @@ impl NiriAdapter {
     pub async fn spawn_and_discover_app_id(&mut self, cmd_str: &str) -> Result<Option<String>> {
         let pre_windows = self.get_windows_json().await?;
         let pre_window_ids: Vec<String> = pre_windows.iter().map(|w| w.id.to_string()).collect();
-
         zummon_debug!("Pre-spawn windows: {}", pre_window_ids.len());
-
         self.spawn_command_string(cmd_str).await?;
-
         let timeout_ms = 5000;
         let interval_ms = 100;
         let max_attempts = timeout_ms / interval_ms;
-
         for attempt in 0..max_attempts {
             tokio::time::sleep(tokio::time::Duration::from_millis(interval_ms)).await;
-
             let post_windows = self.get_windows_json().await?;
-
             for window in &post_windows {
                 if !pre_window_ids.contains(&window.id.to_string()) {
                     zummon_debug!(
@@ -140,14 +127,12 @@ impl NiriAdapter {
                         window.id,
                         window.app_id
                     );
-
                     if let Some(app_id) = &window.app_id {
                         return Ok(Some(app_id.clone()));
                     }
                 }
             }
         }
-
         zummon_debug!("Timeout waiting for new window to appear");
         Ok(None)
     }
@@ -162,13 +147,11 @@ impl Adapter for NiriAdapter {
     async fn find_window(&self, app_id: &str) -> Result<Option<String>> {
         let windows = self.get_windows_json().await?;
         let app_id_lower = app_id.to_lowercase();
-
         if tracing::enabled!(tracing::Level::DEBUG) {
             let available_ids: Vec<String> =
                 windows.iter().filter_map(|w| w.app_id.clone()).collect();
             zummon_debug!("Available app_ids: {:?}", available_ids);
         }
-
         let matching = windows
             .iter()
             .filter(|w| {
@@ -178,7 +161,6 @@ impl Adapter for NiriAdapter {
                     .unwrap_or(false)
             })
             .next_back();
-
         Ok(matching.map(|w| w.id.to_string()))
     }
 
@@ -197,46 +179,23 @@ impl Adapter for NiriAdapter {
     }
 
     async fn spawn_command_string(&mut self, cmd_str: &str) -> Result<()> {
-        zummon_debug!("Executing: {}", cmd_str);
+        zummon_debug!("Executing directly via std::process: {}", cmd_str);
 
-        // AppImages often fail via Niri IPC spawn due to stripped FUSE/session environment.
-        // Launch them directly to inherit your full user session (FUSE, D-Bus, etc.).
-        let is_appimage = cmd_str.contains(".AppImage") || cmd_str.contains(".appimage");
+        // CRITICAL FIX: ALWAYS launch directly via std::process to preserve the full
+        // user session environment (D-Bus, XDG dirs, FUSE). Niri's IPC `spawn` command
+        // aggressively sanitizes these variables, which silently breaks KIO and
+        // AppImage execution in Dolphin.
+        let child = StdCommand::new("sh")
+            .arg("-c")
+            .arg(cmd_str)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .context("Failed to spawn command directly")?;
 
-        if is_appimage {
-            zummon_debug!(
-                "AppImage detected: launching directly via std::process to preserve environment"
-            );
-            let child = StdCommand::new("sh")
-                .arg("-c")
-                .arg(cmd_str)
-                .stdin(Stdio::null())
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .spawn()
-                .context("Failed to spawn AppImage directly")?;
-
-            zummon_debug!("Spawned AppImage with PID: {}", child.id());
-            std::mem::forget(child);
-        } else {
-            // Standard binaries: use Niri IPC spawn for better compositor integration
-            let niri_cmd = format!("niri msg action spawn -- {}", cmd_str);
-            zummon_debug!("Executing: {}", niri_cmd);
-
-            let child = StdCommand::new("sh")
-                .arg("-c")
-                .arg(&niri_cmd)
-                .stdin(Stdio::null())
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .spawn()
-                .context("Failed to spawn niri command")?;
-
-            let pid = child.id();
-            zummon_debug!("Spawned with PID: {}", pid);
-            std::mem::forget(child);
-        }
-
+        zummon_debug!("Spawned with PID: {}", child.id());
+        std::mem::forget(child);
         zummon_debug!("Spawn command executed successfully");
         Ok(())
     }
@@ -272,10 +231,8 @@ impl Adapter for NiriAdapter {
             .iter()
             .find(|w| w.id.to_string() == window_id)
             .context(format!("Window not found: {}", window_id))?;
-
         let (screen_w, screen_h) = self.get_screen_dimensions().await?;
         let current_category = self.get_window_state_category(window, screen_w, screen_h);
-
         if let Some(layout) = &window.layout
             && let Some(size) = layout.window_size
         {
@@ -290,7 +247,6 @@ impl Adapter for NiriAdapter {
                 screen_h
             );
         }
-
         for state in states {
             let should_apply = match state {
                 WindowState::Fullscreen => current_category != WindowState::Fullscreen,
@@ -300,9 +256,7 @@ impl Adapter for NiriAdapter {
                 }
                 WindowState::Floating => current_category != WindowState::Floating,
             };
-
             zummon_debug!("State {:?}: should_apply={}", state, should_apply);
-
             if should_apply {
                 match state {
                     WindowState::Fullscreen => {
@@ -321,7 +275,6 @@ impl Adapter for NiriAdapter {
                 tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
             }
         }
-
         Ok(())
     }
 
@@ -333,22 +286,18 @@ impl Adapter for NiriAdapter {
         let timeout_ms = 3000;
         let interval_ms = 100;
         let max_attempts = timeout_ms / interval_ms;
-
         for _ in 0..max_attempts {
             tokio::time::sleep(tokio::time::Duration::from_millis(interval_ms)).await;
-
             let post_ids = self.get_window_ids().await?;
             let new_window = post_ids
                 .iter()
                 .find(|id| !pre_spawn_ids.contains(id))
                 .cloned();
-
             if let Some(window_id) = new_window {
                 self.apply_states_to_window(&window_id, states).await?;
                 return Ok(());
             }
         }
-
         tracing::warn!(
             "[zummon {}] Timed out waiting for new window after {}ms",
             env!("CARGO_PKG_VERSION"),

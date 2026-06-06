@@ -73,12 +73,10 @@ async fn detect_terminal(cli: &Cli) -> Result<String> {
         return Ok(term.clone());
     }
 
-    // Check for Windows Terminal
     if which::which("wt").is_ok() {
         return Ok("wt".to_string());
     }
 
-    // Fallback to PowerShell
     Ok("powershell".to_string())
 }
 
@@ -205,16 +203,12 @@ async fn build_tui_command(cli: &Cli, app: &str, extra_args: &[String]) -> Resul
 }
 
 // ============================================================================
-// Launch Orchestration (OS-aware)
+// Shared binary + args resolution
 // ============================================================================
 
-pub async fn launch_app(
-    cli: &Cli,
-    match_app: &str,
-    validated_states: &[WindowState],
-    adapter: &mut dyn Adapter,
-) -> Result<()> {
-    // Check if app path is a directory (handles trailing slashes)
+/// Resolves the final binary path and remaining file/extra args from cli,
+/// without any launching. Used by both launch_app and deliver_args_to_running.
+async fn resolve_binary_and_args(cli: &Cli) -> Result<(String, Vec<String>)> {
     let app_path = Path::new(&cli.app);
     let is_dir = if app_path.is_dir() {
         true
@@ -222,11 +216,10 @@ pub async fn launch_app(
         Path::new(cli.app.trim_end_matches('/')).is_dir()
     };
 
-    // Parse --latest flexibility: bare flag, explicit path, or omitted
     let latest_path = cli.latest.as_ref().filter(|p| p.as_os_str() != ".");
     let used_latest_flag = cli.latest.is_some();
 
-    let (launch_app, extra_args) = if is_dir && !used_latest_flag {
+    if is_dir && !used_latest_flag {
         // Implicit --latest: app is a directory, no flag passed
         zummon_debug!("App is a directory, treating as implicit --latest");
         let pattern = cli
@@ -246,14 +239,14 @@ pub async fn launch_app(
         } else {
             Vec::new()
         };
-        (resolved, remaining_args)
+        Ok((resolved, remaining_args))
     } else if let Some(path) = latest_path {
         // Explicit --latest with a provided path
         zummon_debug!("Resolving latest binary under: {}", path.display());
-        (
+        Ok((
             find_latest::resolve_latest(path, &cli.app, cli.use_mod).await?,
             cli.extra_args.clone(),
-        )
+        ))
     } else if used_latest_flag {
         // --latest used as a standalone flag
         if is_dir {
@@ -274,59 +267,43 @@ pub async fn launch_app(
             } else {
                 Vec::new()
             };
-            (resolved, remaining_args)
+            Ok((resolved, remaining_args))
         } else {
-            return Err(anyhow!(
+            Err(anyhow!(
                 "--latest used but APP '{}' is not a directory. Provide a directory path or use --latest <path>.",
                 cli.app
-            ));
+            ))
         }
     } else {
         // Standard launch
-        (cli.app.clone(), cli.extra_args.clone())
-    };
-
-    zummon_debug!("Launch binary: {}", launch_app);
-
-    let cmd_str = if cli.tui {
-        build_tui_command(cli, &launch_app, &extra_args).await?
-    } else {
-        let mut parts = vec![launch_app.clone()];
-        if let Some(class) = &cli.class {
-            if cfg!(target_os = "windows") {
-                // Windows doesn't use --class
-            } else {
-                parts.push(format!("--class {}", class));
-            }
-        }
-        for arg in &extra_args {
-            parts.push(arg.clone());
-        }
-        parts.join(" ")
-    };
-
-    let mut full_cmd = cmd_str;
-    if cli.use_xwayland && cfg!(target_os = "linux") {
-        full_cmd = format!(
-            "env QT_QPA_PLATFORM=xcb GDK_BACKEND=x11 GDK_SCALE=2 {}",
-            full_cmd
-        );
+        Ok((cli.app.clone(), cli.extra_args.clone()))
     }
-    for (key, value) in &cli.env {
-        if cfg!(target_os = "windows") {
-            full_cmd = format!("set {}={} && {}", key, value, full_cmd);
-        } else {
-            full_cmd = format!("env {}={} {}", key, value, full_cmd);
-        }
-    }
+}
 
-    zummon_debug!("Full launch command: {}", full_cmd);
+// ============================================================================
+// Launch Orchestration (OS-aware)
+// ============================================================================
+
+pub async fn launch_app(
+    cli: &Cli,
+    match_app: &str,
+    validated_states: &[WindowState],
+    adapter: &mut dyn Adapter,
+) -> Result<()> {
+    let (launch_bin, extra_args) = resolve_binary_and_args(cli).await?;
+
+    zummon_debug!("Launch binary: {}", launch_bin);
+    zummon_debug!("Extra args: {:?}", extra_args);
 
     let pre_spawn_ids = adapter.get_window_ids().await?;
     zummon_debug!("Pre-spawn window IDs: {:?}", pre_spawn_ids);
 
     if cli.bypass_adapter {
-        zummon_debug!("Bypassing window system, launching directly");
+        // bypass_adapter still uses sh -c (intentional: user may pass a shell expression)
+        zummon_debug!("Bypassing window system, launching directly via sh -c");
+
+        let full_cmd = build_shell_cmd_string(cli, &launch_bin, &extra_args);
+        zummon_debug!("Full shell command: {}", full_cmd);
 
         let (shell, shell_arg) = if cfg!(target_os = "windows") {
             ("cmd", "/C")
@@ -345,19 +322,42 @@ pub async fn launch_app(
 
         zummon_debug!("Process spawned with PID: {}", child.id().unwrap_or(0));
         std::mem::forget(child);
-    } else {
-        zummon_debug!("Launching through adapter");
+    } else if cli.tui {
+        // TUI: build terminal command string and pass to adapter / sh -c
+        let tui_cmd = build_tui_command(cli, &launch_bin, &extra_args).await?;
+        zummon_debug!("TUI command: {}", tui_cmd);
 
         if let Some(niri_adapter) = adapter.as_any_mut().downcast_mut::<NiriAdapter>() {
-            let discovered_app_id = niri_adapter.spawn_and_discover_app_id(&full_cmd).await?;
-
+            let discovered_app_id = niri_adapter.spawn_and_discover_app_id(&tui_cmd).await?;
             if let Some(actual_app_id) = discovered_app_id {
                 zummon_debug!(
                     "Discovered actual app_id: {} (was looking for: {})",
                     actual_app_id,
                     match_app
                 );
+            }
+        } else {
+            adapter.spawn_command_string(&tui_cmd).await?;
+        }
+    } else {
+        // Direct launch: use Command::arg() so paths with spaces are never word-split.
+        zummon_debug!("Launching '{}' directly with Command::arg()", launch_bin);
 
+        let mut cmd = build_direct_command(cli, &launch_bin, &extra_args);
+
+        if let Some(niri_adapter) = adapter.as_any_mut().downcast_mut::<NiriAdapter>() {
+            // Niri needs to know the command string for app_id discovery.
+            // We rebuild as a shell string only for that purpose.
+            let cmd_str_for_niri = build_shell_cmd_string(cli, &launch_bin, &extra_args);
+            let discovered_app_id = niri_adapter
+                .spawn_and_discover_app_id(&cmd_str_for_niri)
+                .await?;
+            if let Some(actual_app_id) = discovered_app_id {
+                zummon_debug!(
+                    "Discovered actual app_id: {} (was looking for: {})",
+                    actual_app_id,
+                    match_app
+                );
                 if actual_app_id != match_app {
                     zummon_debug!(
                         "Note: Actual app_id differs. Future runs may need --app-id {}",
@@ -366,7 +366,14 @@ pub async fn launch_app(
                 }
             }
         } else {
-            adapter.spawn_command_string(&full_cmd).await?;
+            let child = cmd
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+                .context("Failed to spawn application")?;
+            zummon_debug!("Process spawned with PID: {}", child.id().unwrap_or(0));
+            std::mem::forget(child);
         }
     }
 
@@ -379,6 +386,131 @@ pub async fn launch_app(
 
     Ok(())
 }
+
+/// Called when zummon finds an existing window and focuses it, but extra_args
+/// (e.g. %F file paths from a desktop Open With) also need to reach the app.
+///
+/// Strategy: re-spawn the resolved binary with only the file args. For apps
+/// with their own single-instance IPC (ocenaudio, most Qt/GTK apps, browsers,
+/// etc.) this second process detects the running instance, forwards the files
+/// via IPC, and exits immediately. Zummon never tries to manage that window —
+/// it has already done its job by focusing the existing one.
+pub async fn deliver_args_to_running(cli: &Cli) -> Result<()> {
+    let (launch_bin, file_args) = resolve_binary_and_args(cli).await?;
+
+    zummon_debug!(
+        "Delivering extra_args to running instance of '{}': {:?}",
+        launch_bin,
+        file_args
+    );
+
+    if file_args.is_empty() {
+        zummon_debug!("No args to deliver, skipping");
+        return Ok(());
+    }
+
+    let mut cmd = Command::new(&launch_bin);
+    for arg in &file_args {
+        cmd.arg(arg);
+    }
+    apply_env_to_command(cli, &mut cmd);
+
+    let child = cmd
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .context("Failed to deliver args to running instance")?;
+
+    zummon_debug!(
+        "Delivery process spawned with PID: {}",
+        child.id().unwrap_or(0)
+    );
+    std::mem::forget(child);
+
+    Ok(())
+}
+
+// ============================================================================
+// Command builders
+// ============================================================================
+
+/// Build a tokio::process::Command for direct (non-TUI, non-bypass) launches.
+/// Uses .arg() for every argument so paths with spaces are never word-split.
+fn build_direct_command(cli: &Cli, launch_bin: &str, extra_args: &[String]) -> Command {
+    let mut cmd = Command::new(launch_bin);
+
+    if let Some(class) = &cli.class {
+        if !cfg!(target_os = "windows") {
+            cmd.arg("--class").arg(class);
+        }
+    }
+
+    for arg in extra_args {
+        cmd.arg(arg);
+    }
+
+    apply_env_to_command(cli, &mut cmd);
+
+    cmd
+}
+
+/// Apply cli.env and --use-xwayland to a Command via .env() calls.
+fn apply_env_to_command(cli: &Cli, cmd: &mut Command) {
+    for (key, value) in &cli.env {
+        cmd.env(key, value);
+    }
+
+    if cli.use_xwayland && cfg!(target_os = "linux") {
+        cmd.env("QT_QPA_PLATFORM", "xcb");
+        cmd.env("GDK_BACKEND", "x11");
+        cmd.env("GDK_SCALE", "2");
+    }
+}
+
+/// Build a shell-string representation of the command (used only for
+/// --bypass-adapter and for passing to Niri's spawn_and_discover_app_id).
+/// File paths are single-quoted so spaces survive sh -c word-splitting.
+fn build_shell_cmd_string(cli: &Cli, launch_bin: &str, extra_args: &[String]) -> String {
+    let mut parts = vec![shell_quote(launch_bin)];
+
+    if let Some(class) = &cli.class {
+        if !cfg!(target_os = "windows") {
+            parts.push("--class".to_string());
+            parts.push(shell_quote(class));
+        }
+    }
+
+    for arg in extra_args {
+        parts.push(shell_quote(arg));
+    }
+
+    let mut full = parts.join(" ");
+
+    // Env vars prepended as "env K=V" for shell evaluation
+    for (key, value) in cli.env.iter().rev() {
+        full = format!("env {}={} {}", key, shell_quote(value), full);
+    }
+
+    if cli.use_xwayland && cfg!(target_os = "linux") {
+        full = format!(
+            "env QT_QPA_PLATFORM=xcb GDK_BACKEND=x11 GDK_SCALE=2 {}",
+            full
+        );
+    }
+
+    full
+}
+
+/// Single-quote a string for safe use inside sh -c.
+/// All characters including spaces and globs are treated literally.
+fn shell_quote(s: &str) -> String {
+    format!("'{}'", s.replace('\'', "'\\''"))
+}
+
+// ============================================================================
+// If-focused command execution
+// ============================================================================
 
 pub async fn execute_if_focused_command(cmd_str: &str) -> Result<()> {
     let parts = shell_words::split(cmd_str).context("Failed to parse if-focused command")?;
@@ -412,6 +544,10 @@ pub async fn execute_if_focused_command(cmd_str: &str) -> Result<()> {
 
     Ok(())
 }
+
+// ============================================================================
+// Match app ID derivation
+// ============================================================================
 
 pub async fn build_match_app(cli: &Cli) -> Result<String> {
     if cli.tui && cli.app_id.is_none() && cli.class.is_none() {

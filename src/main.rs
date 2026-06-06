@@ -221,6 +221,21 @@ async fn main() -> Result<()> {
                     if let Some(cmd) = &cli.if_focused {
                         zummon_debug!("Window already focused, executing: {}", cmd);
                         launch::execute_if_focused_command(cmd).await?;
+                        // Still deliver file args even when --if-focused fires
+                        if !cli.extra_args.is_empty() {
+                            zummon_debug!("Delivering extra_args after if-focused command");
+                            launch::deliver_args_to_running(&cli).await?;
+                        }
+                        return Ok(());
+                    }
+                    // Window is already focused and no --if-focused set.
+                    // Still deliver any file args (e.g. %F from Dolphin open-with).
+                    if !cli.extra_args.is_empty() {
+                        zummon_debug!(
+                            "Window already focused, delivering extra_args ({} item(s))",
+                            cli.extra_args.len()
+                        );
+                        launch::deliver_args_to_running(&cli).await?;
                         return Ok(());
                     }
                     zummon_debug!("Window already focused, doing nothing");
@@ -235,6 +250,21 @@ async fn main() -> Result<()> {
                         .apply_states_to_window(&window_id, &validated_states)
                         .await?;
                 }
+
+                // If the caller passed file/extra args (e.g. %F from a desktop
+                // Open With action), deliver them to the already-running instance.
+                // Most apps with single-instance IPC (Qt, GTK, Electron, etc.)
+                // will detect the running instance, forward the files via their
+                // own socket/lock mechanism, and exit immediately. Zummon does
+                // not manage that second process — it has already done its job.
+                if !cli.extra_args.is_empty() {
+                    zummon_debug!(
+                        "extra_args present ({} item(s)), delivering to running instance",
+                        cli.extra_args.len()
+                    );
+                    launch::deliver_args_to_running(&cli).await?;
+                }
+
                 false
             }
             None => {
