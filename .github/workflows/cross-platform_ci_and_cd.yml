@@ -41,10 +41,10 @@ jobs:
       - name: Upload binary artifact
         uses: actions/upload-artifact@v4
         with:
-          name: clump-${{ matrix.os }}
+          name: zummon-${{ matrix.os }}
           path: |
-            target/release/clump
-            target/release/clump.exe
+            target/release/zummon
+            target/release/zummon.exe
           if-no-files-found: error
 
   release:
@@ -64,19 +64,19 @@ jobs:
       - name: Download Linux Artifact
         uses: actions/download-artifact@v4
         with:
-          name: clump-ubuntu-latest
+          name: zummon-ubuntu-latest
           path: ${{ github.workspace }}/incoming/ubuntu
 
       - name: Download macOS Artifact
         uses: actions/download-artifact@v4
         with:
-          name: clump-macos-latest
+          name: zummon-macos-latest
           path: ${{ github.workspace }}/incoming/macos
 
       - name: Download Windows Artifact
         uses: actions/download-artifact@v4
         with:
-          name: clump-windows-latest
+          name: zummon-windows-latest
           path: ${{ github.workspace }}/incoming/windows
 
       - name: Package artifacts for release
@@ -84,18 +84,18 @@ jobs:
           cd ${{ github.workspace }}/incoming
 
           # Package Linux binary
-          if [ -f "ubuntu/clump" ]; then
-            tar -czf ${{ github.workspace }}/release-files/clump-linux.tar.gz -C ubuntu clump
+          if [ -f "ubuntu/zummon" ]; then
+            tar -czf ${{ github.workspace }}/release-files/zummon-linux.tar.gz -C ubuntu zummon
           fi
 
           # Package macOS binary
-          if [ -f "macos/clump" ]; then
-            tar -czf ${{ github.workspace }}/release-files/clump-macos.tar.gz -C macos clump
+          if [ -f "macos/zummon" ]; then
+            tar -czf ${{ github.workspace }}/release-files/zummon-macos.tar.gz -C macos zummon
           fi
 
           # Package Windows binary
-          if [ -f "windows/clump.exe" ]; then
-            zip -j ${{ github.workspace }}/release-files/clump-windows.zip windows/clump.exe
+          if [ -f "windows/zummon.exe" ]; then
+            zip -j ${{ github.workspace }}/release-files/zummon-windows.zip windows/zummon.exe
           fi
 
           # Generate checksums
