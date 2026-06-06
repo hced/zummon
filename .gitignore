@@ -1,3 +1,8 @@
+# Typical project-based cruft
+/target
+ISSUES.md
+*.orig
+
 # Backup directory
 .bkp/
 
@@ -17,5 +22,3 @@ Thumbs.db
 
 # Log files
 *.log
-
-*.orig
