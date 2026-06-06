@@ -181,10 +181,8 @@ impl Adapter for NiriAdapter {
     async fn spawn_command_string(&mut self, cmd_str: &str) -> Result<()> {
         zummon_debug!("Executing directly via std::process: {}", cmd_str);
 
-        // CRITICAL FIX: ALWAYS launch directly via std::process to preserve the full
-        // user session environment (D-Bus, XDG dirs, FUSE). Niri's IPC `spawn` command
-        // aggressively sanitizes these variables, which silently breaks KIO and
-        // AppImage execution in Dolphin.
+        // Launch directly via std::process. It will automatically inherit the
+        // restored session environment injected by ensure_session_environment() in main.rs.
         let child = StdCommand::new("sh")
             .arg("-c")
             .arg(cmd_str)

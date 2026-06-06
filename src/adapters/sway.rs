@@ -162,26 +162,23 @@ impl SwayAdapter {
             .iter()
             .filter_map(|w| self.get_window_app_id(w))
             .collect();
-
         if candidates.is_empty() {
             return Ok(None);
         }
-
         let binary_name = std::path::Path::new(binary)
             .file_name()
             .unwrap_or_default()
             .to_string_lossy();
-
         let variants = crate::focus::generate_variants(&binary_name);
         zummon_debug!("Testing variants: {:?}", variants);
-
         let mut best_match = None;
         let mut best_score = 0.0;
-        let engine = pas_fuzzy_search::PasFuzzySearch::new(binary_name.to_lowercase());
 
+        // FIX: Score the candidate against the variant, not the variant against itself!
         for candidate in &candidates {
             for variant in &variants {
-                let score = engine.score(variant);
+                let engine = pas_fuzzy_search::PasFuzzySearch::new(variant.to_lowercase());
+                let score = engine.score(candidate);
                 if score > best_score {
                     best_score = score;
                     best_match = Some((candidate.clone(), score));

@@ -56,12 +56,10 @@ impl HyprlandAdapter {
 
     async fn hyprctl(&self, args: &[&str]) -> Result<String> {
         let output = Command::new("hyprctl").args(args).output().await?;
-
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
             return Err(anyhow!("hyprctl failed: {}", stderr));
         }
-
         Ok(String::from_utf8_lossy(&output.stdout).to_string())
     }
 
@@ -85,7 +83,6 @@ impl HyprlandAdapter {
         if window.floating {
             return WindowState::Floating;
         }
-
         match window.fullscreen {
             1 => WindowState::Fullscreen,
             2 => WindowState::MaximizeEdges,
@@ -103,20 +100,14 @@ impl HyprlandAdapter {
     pub async fn spawn_and_discover_app_id(&mut self, cmd_str: &str) -> Result<Option<String>> {
         let pre_windows = self.get_windows_json().await?;
         let pre_addresses: Vec<String> = pre_windows.iter().map(|w| w.address.clone()).collect();
-
         zummon_debug!("Pre-spawn windows: {}", pre_addresses.len());
-
         self.spawn_command_string(cmd_str).await?;
-
         let timeout_ms = 5000;
         let interval_ms = 100;
         let max_attempts = timeout_ms / interval_ms;
-
         for attempt in 0..max_attempts {
             tokio::time::sleep(tokio::time::Duration::from_millis(interval_ms)).await;
-
             let post_windows = self.get_windows_json().await?;
-
             for window in &post_windows {
                 if !pre_addresses.contains(&window.address) {
                     zummon_debug!(
@@ -129,7 +120,6 @@ impl HyprlandAdapter {
                 }
             }
         }
-
         zummon_debug!("Timeout waiting for new window to appear");
         Ok(None)
     }
@@ -137,26 +127,23 @@ impl HyprlandAdapter {
     pub async fn find_window_with_heuristics(&self, binary: &str) -> Result<Option<String>> {
         let windows = self.get_windows_json().await?;
         let candidates: Vec<&String> = windows.iter().map(|w| &w.class).collect();
-
         if candidates.is_empty() {
             return Ok(None);
         }
-
         let binary_name = std::path::Path::new(binary)
             .file_name()
             .unwrap_or_default()
             .to_string_lossy();
-
         let variants = crate::focus::generate_variants(&binary_name);
         zummon_debug!("Testing variants: {:?}", variants);
-
         let mut best_match = None;
         let mut best_score = 0.0;
-        let engine = pas_fuzzy_search::PasFuzzySearch::new(binary_name.to_lowercase());
 
-        for candidate in candidates {
+        // FIX: Score the candidate against the variant
+        for candidate in &candidates {
             for variant in &variants {
-                let score = engine.score(variant);
+                let engine = pas_fuzzy_search::PasFuzzySearch::new(variant.to_lowercase());
+                let score = engine.score(candidate);
                 if score > best_score {
                     best_score = score;
                     best_match = Some((candidate.clone(), score));
@@ -187,16 +174,13 @@ impl Adapter for HyprlandAdapter {
     async fn find_window(&self, app_id: &str) -> Result<Option<String>> {
         let windows = self.get_windows_json().await?;
         let app_id_lower = app_id.to_lowercase();
-
         if tracing::enabled!(tracing::Level::DEBUG) {
             let available_ids: Vec<String> = windows.iter().map(|w| w.class.clone()).collect();
             zummon_debug!("Available app_ids: {:?}", available_ids);
         }
-
         let matching = windows
             .iter()
             .rfind(|w| w.class.to_lowercase().ends_with(&app_id_lower));
-
         Ok(matching.map(|w| w.address.clone()))
     }
 
@@ -213,7 +197,6 @@ impl Adapter for HyprlandAdapter {
     async fn spawn_command_string(&mut self, cmd_str: &str) -> Result<()> {
         let hypr_cmd = format!("hyprctl dispatch exec -- {}", cmd_str);
         zummon_debug!("Executing: {}", hypr_cmd);
-
         let child = StdCommand::new("sh")
             .arg("-c")
             .arg(&hypr_cmd)
@@ -222,12 +205,9 @@ impl Adapter for HyprlandAdapter {
             .stderr(Stdio::null())
             .spawn()
             .context("Failed to spawn hyprctl command")?;
-
         let pid = child.id();
         zummon_debug!("Spawned with PID: {}", pid);
-
         std::mem::forget(child);
-
         zummon_debug!("Spawn command executed successfully");
         Ok(())
     }
@@ -263,9 +243,7 @@ impl Adapter for HyprlandAdapter {
             .iter()
             .find(|w| w.address == window_id)
             .context(format!("Window not found: {}", window_id))?;
-
         let current_category = self.get_window_state_category(window);
-
         for state in states {
             let should_apply = match state {
                 WindowState::Fullscreen => current_category != WindowState::Fullscreen,
@@ -275,9 +253,7 @@ impl Adapter for HyprlandAdapter {
                 }
                 WindowState::Floating => current_category != WindowState::Floating,
             };
-
             zummon_debug!("State {:?}: should_apply={}", state, should_apply);
-
             if should_apply {
                 match state {
                     WindowState::Fullscreen => {
@@ -309,22 +285,18 @@ impl Adapter for HyprlandAdapter {
         let timeout_ms = 3000;
         let interval_ms = 100;
         let max_attempts = timeout_ms / interval_ms;
-
         for _ in 0..max_attempts {
             tokio::time::sleep(tokio::time::Duration::from_millis(interval_ms)).await;
-
             let post_ids = self.get_window_ids().await?;
             let new_window = post_ids
                 .iter()
                 .find(|id| !pre_spawn_ids.contains(id))
                 .cloned();
-
             if let Some(window_id) = new_window {
                 self.apply_states_to_window(&window_id, states).await?;
                 return Ok(());
             }
         }
-
         tracing::warn!(
             "[zummon {}] Timed out waiting for new window after {}ms",
             env!("CARGO_PKG_VERSION"),

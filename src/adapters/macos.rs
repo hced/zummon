@@ -96,26 +96,23 @@ return output
     pub async fn find_window_with_heuristics(&self, binary: &str) -> Result<Option<String>> {
         let windows = self.get_windows_applescript().await?;
         let candidates: Vec<&String> = windows.iter().map(|w| &w.app_id).collect();
-
         if candidates.is_empty() {
             return Ok(None);
         }
-
         let binary_name = Path::new(binary)
             .file_name()
             .unwrap_or_default()
             .to_string_lossy();
-
         let variants = focus::generate_variants(&binary_name);
         zummon_debug!("Testing variants: {:?}", variants);
-
         let mut best_match = None;
         let mut best_score = 0.0;
-        let engine = pas_fuzzy_search::PasFuzzySearch::new(binary_name.to_lowercase());
 
-        for candidate in candidates {
+        // FIX: Score the candidate against the variant
+        for candidate in &candidates {
             for variant in &variants {
-                let score = engine.score(variant);
+                let engine = pas_fuzzy_search::PasFuzzySearch::new(variant.to_lowercase());
+                let score = engine.score(candidate);
                 if score > best_score {
                     best_score = score;
                     best_match = Some((candidate.clone(), score));

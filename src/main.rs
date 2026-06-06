@@ -1,6 +1,5 @@
 // src/main.rs - Entry point and orchestration
 use tracing_subscriber::prelude::*;
-
 mod adapters;
 mod cli;
 mod find_latest;
@@ -21,31 +20,85 @@ use cli::Cli;
 use std::path::{Path, PathBuf};
 use traits::{Adapter, LinuxWindowSystem, Platform};
 
+/// CRITICAL FIX: Restore essential session environment variables that Niri strips.
+/// By doing this at the very start of main, ALL child processes (launch, deliver_args, etc.)
+/// will automatically inherit the correct environment without needing individual patches.
+fn ensure_session_environment() {
+    // 1. Fix DBUS_SESSION_BUS_ADDRESS
+    if std::env::var("DBUS_SESSION_BUS_ADDRESS").is_err() {
+        if let Ok(output) = std::process::Command::new("id").arg("-u").output() {
+            if let Ok(uid_str) = String::from_utf8(output.stdout) {
+                let uid = uid_str.trim();
+                let dbus_path = format!("/run/user/{}/bus", uid);
+                if std::path::Path::new(&dbus_path).exists() {
+                    // SAFETY: Called at the very start of main, before any threads are spawned.
+                    unsafe {
+                        std::env::set_var(
+                            "DBUS_SESSION_BUS_ADDRESS",
+                            format!("unix:path={}", dbus_path),
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    // 2. Fix XDG_RUNTIME_DIR
+    if std::env::var("XDG_RUNTIME_DIR").is_err() {
+        if let Ok(output) = std::process::Command::new("id").arg("-u").output() {
+            if let Ok(uid_str) = String::from_utf8(output.stdout) {
+                let runtime_dir = format!("/run/user/{}", uid_str.trim());
+                if std::path::Path::new(&runtime_dir).exists() {
+                    // SAFETY: Called at the very start of main, before any threads are spawned.
+                    unsafe {
+                        std::env::set_var("XDG_RUNTIME_DIR", runtime_dir);
+                    }
+                }
+            }
+        }
+    }
+
+    // 3. Fix XDG_DATA_DIRS (required for MIME type resolution)
+    if std::env::var("XDG_DATA_DIRS").is_err() {
+        // SAFETY: Called at the very start of main, before any threads are spawned.
+        unsafe {
+            std::env::set_var("XDG_DATA_DIRS", "/usr/local/share:/usr/share");
+        }
+    }
+
+    // 4. Fix XDG_CONFIG_DIRS
+    if std::env::var("XDG_CONFIG_DIRS").is_err() {
+        // SAFETY: Called at the very start of main, before any threads are spawned.
+        unsafe {
+            std::env::set_var("XDG_CONFIG_DIRS", "/etc/xdg");
+        }
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
-    let cli = Cli::parse();
+    // Restore environment before anything else happens
+    ensure_session_environment();
 
+    let cli = Cli::parse();
     if let Some(maybe_path) = &cli.log {
         let log_path = match maybe_path {
             Some(path) => path.clone(),
             None => default_log_path(),
         };
         let log_file = setup_log_file(&log_path).await?;
-
         if cli.debug {
             let console_layer = tracing_subscriber::fmt::layer()
                 .with_target(false)
                 .without_time()
                 .with_writer(std::io::stdout)
                 .with_filter(tracing_subscriber::filter::LevelFilter::DEBUG);
-
             let file_layer = tracing_subscriber::fmt::layer()
                 .with_ansi(false)
                 .with_target(false)
                 .without_time()
                 .with_writer(log_file)
                 .with_filter(tracing_subscriber::filter::LevelFilter::DEBUG);
-
             tracing_subscriber::registry()
                 .with(console_layer)
                 .with(file_layer)
@@ -56,14 +109,12 @@ async fn main() -> Result<()> {
             } else {
                 tracing_subscriber::filter::LevelFilter::DEBUG
             };
-
             let file_layer = tracing_subscriber::fmt::layer()
                 .with_ansi(false)
                 .with_target(false)
                 .without_time()
                 .with_writer(log_file)
                 .with_filter(level_filter);
-
             tracing_subscriber::registry().with(file_layer).init();
         }
     } else if cli.debug {
@@ -111,8 +162,8 @@ async fn main() -> Result<()> {
             }
         }
     }
-    zummon_debug!("Detected platform: {:?}", platform);
 
+    zummon_debug!("Detected platform: {:?}", platform);
     zummon_debug!("CLI: app={}, new_instance={}", cli.app, cli.new_instance);
 
     let match_app = launch::build_match_app(&cli).await?;
@@ -129,8 +180,7 @@ async fn main() -> Result<()> {
             LinuxWindowSystem::Mutter => Box::new(adapters::mutter::MutterAdapter::new().await?),
             _ => {
                 return Err(anyhow!(
-                    "Unsupported Linux window system: {}\n\
-                     Currently Niri, Hyprland, Sway, KWin, and Mutter are supported.",
+                    "Unsupported Linux window system: {}\nCurrently Niri, Hyprland, Sway, KWin, and Mutter are supported.",
                     window_system.name()
                 ));
             }
@@ -143,22 +193,18 @@ async fn main() -> Result<()> {
     };
 
     let validated_states = adapter.validate_states(cli.window_states()).await?;
-
     zummon_debug!("Validated window states: {:?}", validated_states);
 
     let should_launch = if !cli.new_instance {
         let mut found_window = None;
-
         if let Some(window_id) = adapter.find_window(&match_app).await? {
             found_window = Some(window_id);
         }
 
         if found_window.is_none() && cli.app_id.is_none() && cli.class.is_none() && !cli.tui {
             let is_running = focus::is_process_running(&cli.app)?;
-
             if is_running {
                 zummon_debug!("Process is running but no window found. Applying heuristics...");
-
                 if let Some(hypr_adapter) = adapter
                     .as_any_mut()
                     .downcast_mut::<adapters::hyprland::HyprlandAdapter>()
@@ -202,12 +248,14 @@ async fn main() -> Result<()> {
                 } else if let Some(windows_adapter) = adapter
                     .as_any_mut()
                     .downcast_mut::<adapters::windows::WindowsAdapter>(
-                ) && let Some(window_id) = windows_adapter
-                    .find_window_with_heuristics(&cli.app)
-                    .await?
-                {
-                    zummon_debug!("Heuristics (Windows) found window!");
-                    found_window = Some(window_id);
+                ) {
+                    if let Some(window_id) = windows_adapter
+                        .find_window_with_heuristics(&cli.app)
+                        .await?
+                    {
+                        zummon_debug!("Heuristics (Windows) found window!");
+                        found_window = Some(window_id);
+                    }
                 }
             }
         }
@@ -216,20 +264,16 @@ async fn main() -> Result<()> {
             Some(window_id) => {
                 zummon_debug!("Found window: {}", window_id);
                 let focused_id = adapter.get_focused_window().await?;
-
                 if focused_id == Some(window_id.clone()) {
                     if let Some(cmd) = &cli.if_focused {
                         zummon_debug!("Window already focused, executing: {}", cmd);
                         launch::execute_if_focused_command(cmd).await?;
-                        // Still deliver file args even when --if-focused fires
                         if !cli.extra_args.is_empty() {
                             zummon_debug!("Delivering extra_args after if-focused command");
                             launch::deliver_args_to_running(&cli).await?;
                         }
                         return Ok(());
                     }
-                    // Window is already focused and no --if-focused set.
-                    // Still deliver any file args (e.g. %F from Dolphin open-with).
                     if !cli.extra_args.is_empty() {
                         zummon_debug!(
                             "Window already focused, delivering extra_args ({} item(s))",
@@ -241,22 +285,13 @@ async fn main() -> Result<()> {
                     zummon_debug!("Window already focused, doing nothing");
                     return Ok(());
                 }
-
                 zummon_debug!("Focusing window: {}", window_id);
                 adapter.focus_window(&window_id).await?;
-
                 if cli.override_state && !validated_states.is_empty() {
                     adapter
                         .apply_states_to_window(&window_id, &validated_states)
                         .await?;
                 }
-
-                // If the caller passed file/extra args (e.g. %F from a desktop
-                // Open With action), deliver them to the already-running instance.
-                // Most apps with single-instance IPC (Qt, GTK, Electron, etc.)
-                // will detect the running instance, forward the files via their
-                // own socket/lock mechanism, and exit immediately. Zummon does
-                // not manage that second process — it has already done its job.
                 if !cli.extra_args.is_empty() {
                     zummon_debug!(
                         "extra_args present ({} item(s)), delivering to running instance",
@@ -264,7 +299,6 @@ async fn main() -> Result<()> {
                     );
                     launch::deliver_args_to_running(&cli).await?;
                 }
-
                 false
             }
             None => {
@@ -313,7 +347,6 @@ async fn setup_log_file(path: &Path) -> Result<std::fs::File> {
         tokio::fs::create_dir_all(parent).await?;
     }
     rotate_log_if_needed(path).await?;
-
     Ok(std::fs::OpenOptions::new()
         .create(true)
         .append(true)
@@ -323,7 +356,6 @@ async fn setup_log_file(path: &Path) -> Result<std::fs::File> {
 async fn rotate_log_if_needed(path: &Path) -> Result<()> {
     const MAX_SIZE: u64 = 10 * 1024 * 1024;
     const MAX_FILES: usize = 5;
-
     if let Ok(metadata) = tokio::fs::metadata(path).await
         && metadata.len() > MAX_SIZE
     {
@@ -334,6 +366,5 @@ async fn rotate_log_if_needed(path: &Path) -> Result<()> {
         }
         let _ = tokio::fs::rename(path, format!("{}.1", path.display())).await;
     }
-
     Ok(())
 }
