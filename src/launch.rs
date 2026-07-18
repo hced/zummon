@@ -23,7 +23,7 @@ async fn detect_terminal(cli: &Cli) -> Result<String> {
         return Ok(term);
     }
 
-    let priority_list = ["ghostty", "kitty", "foot", "alacritty", "wezterm"];
+    let priority_list = ["kitty", "ghostty", "foot", "alacritty", "wezterm"];
 
     for term in priority_list {
         if which::which(term).is_ok() {
@@ -55,6 +55,12 @@ async fn detect_terminal(cli: &Cli) -> Result<String> {
         return Ok(term.clone());
     }
 
+    // macOS is Unix-like; honor $TERMINAL (a real POSIX/fish/zsh convention)
+    // when the user has set it, e.g. "kitty --single-instance" or "Terminal".
+    if let Ok(term) = std::env::var("TERMINAL") {
+        return Ok(term);
+    }
+
     let priority_list = ["iTerm", "Terminal", "alacritty", "kitty", "wezterm"];
 
     for term in priority_list {
@@ -71,6 +77,12 @@ async fn detect_terminal(cli: &Cli) -> Result<String> {
 async fn detect_terminal(cli: &Cli) -> Result<String> {
     if let Some(term) = &cli.terminal {
         return Ok(term.clone());
+    }
+
+    // $TERMINAL is a Unix convention and rarely set on Windows, but honor it
+    // for cross-platform parity when a user does configure it.
+    if let Ok(term) = std::env::var("TERMINAL") {
+        return Ok(term);
     }
 
     if which::which("wt").is_ok() {
@@ -95,12 +107,14 @@ async fn build_tui_command(cli: &Cli, app: &str, extra_args: &[String]) -> Resul
             parts.push(app.to_string());
             parts.extend(extra_args.iter().cloned());
             return Ok(parts.join(" "));
-        } else {
+        } else if terminal_cmd == "powershell" {
             let mut parts = vec!["powershell".to_string(), "-Command".to_string()];
             parts.push(app.to_string());
             parts.extend(extra_args.iter().cloned());
             return Ok(parts.join(" "));
         }
+        // Any other terminal (e.g. a custom $TERMINAL) falls through to the
+        // generic flag-aware builder below instead of being forced into powershell.
     }
 
     if cfg!(target_os = "macos") && (terminal_cmd == "iTerm" || terminal_cmd == "Terminal") {
