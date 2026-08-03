@@ -51,6 +51,7 @@ UNIVERSAL OPTIONS
    Window Management:
      --new-instance        Launch a new instance, don't try to focus existing
      --if-focused <CMD>    Execute command if the application is already focused
+     --toggle              Quit the app if it is running, otherwise launch it
 
    Application Matching:
      --app-id <ID>         Explicitly set the window class/ID for matching
@@ -164,6 +165,9 @@ pub struct Cli {
 
     #[arg(long)]
     pub new_instance: bool,
+
+    #[arg(long)]
+    pub toggle: bool,
 
     #[arg(long)]
     pub tui: bool,

@@ -42,6 +42,7 @@ zummon ~/.local/opt blender
 - **Process Detection:** Finds running processes even when the window class mismatches.
 - **Heuristic Matching:** Uses the Jaro-Winkler algorithm for fuzzy window matching.
 - **Version Resolution:** Can launch the latest application from a versioned directory tree.
+- **Toggle Mode:** One command to flip an app's running state — quit it if it's running, launch it if it isn't.
 - **TUI Support:** Can launch TUI apps in separate terminal windows with custom window classes.
 - **Environment Variables:** Can inject custom environment variables into launched apps.
 - **Debug Logging:** Supports console output and file logging with automatic rotation.
@@ -105,6 +106,25 @@ zummon --new-instance nvim
 # Use explicit app-id for matching
 zummon --app-id org.kde.dolphin dolphin
 ```
+
+### Toggle Mode
+
+Flip an application's running state with a single command — bind it to a key for a
+"start/stop" switch:
+
+```bash
+# Quit Firefox if running, otherwise launch it
+zummon --toggle firefox
+```
+
+When the app is running it is quit gracefully (window close request, escalated to
+SIGTERM if the process survives — e.g. tray apps). When it is not running, it is
+launched as usual. If the app is not running and there is nothing to quit, the
+command succeeds as a no-op.
+
+`--toggle` cannot be combined with `--new-instance` or `--if-focused` (contradictory
+semantics). Platform support: Niri (verified), Hyprland/Sway/KWin/macOS/Windows
+(implemented, untested), Mutter (not supported — launch-only).
 
 ### Terminal Applications (TUI)
 ```bash

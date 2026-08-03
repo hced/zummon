@@ -194,6 +194,25 @@ impl Adapter for HyprlandAdapter {
         Ok(())
     }
 
+    async fn close_window(&self, window_id: &str) -> Result<()> {
+        // Hyprland ≥ 0.55 uses Lua-based dispatchers; older versions accept the
+        // legacy `closewindow` command. Try both, as the Lua API is not
+        // guaranteed to be stable across versions.
+        let modern = format!(
+            "hl.dsp.window.close({{ window = \"address:{}\" }})",
+            window_id
+        );
+        match self.hyprctl(&["dispatch", &modern]).await {
+            Ok(_) => Ok(()),
+            Err(_) => {
+                zummon_debug!("Modern close dispatcher failed, trying legacy closewindow");
+                self.hyprctl(&["dispatch", "closewindow", &format!("address:{}", window_id)])
+                    .await?;
+                Ok(())
+            }
+        }
+    }
+
     async fn spawn_command_string(&mut self, cmd_str: &str) -> Result<()> {
         let hypr_cmd = format!("hyprctl dispatch exec -- {}", cmd_str);
         zummon_debug!("Executing: {}", hypr_cmd);

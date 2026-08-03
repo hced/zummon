@@ -9,9 +9,9 @@ use sysinfo::System;
 // ============================================================================
 // Process Detection (cross-platform via sysinfo)
 // ============================================================================
-/// Check if a binary is currently running using heuristic name matching.
+/// Find a running process matching `binary` using heuristic name matching.
 /// Uses sysinfo for cross-platform process enumeration (no external tools needed).
-pub fn is_process_running(binary: &str) -> Result<bool> {
+pub fn find_process(binary: &str) -> Result<Option<sysinfo::Pid>> {
     let binary_name = Path::new(binary)
         .file_name()
         .unwrap_or_default()
@@ -23,14 +23,14 @@ pub fn is_process_running(binary: &str) -> Result<bool> {
         let proc_name = process.name().to_string_lossy();
         // Exact match
         if proc_name == binary_name {
-            return Ok(true);
+            return Ok(Some(process.pid()));
         }
         // Try stripped suffixes
         for suffix in ["-bin", "-browser", "-stable", "-beta", "-nightly", "-dev"] {
             if let Some(stripped) = binary_name.strip_suffix(suffix)
                 && proc_name == stripped
             {
-                return Ok(true);
+                return Ok(Some(process.pid()));
             }
         }
         // Try stripped prefixes
@@ -38,14 +38,14 @@ pub fn is_process_running(binary: &str) -> Result<bool> {
             if let Some(stripped) = binary_name.strip_prefix(prefix)
                 && proc_name == stripped
             {
-                return Ok(true);
+                return Ok(Some(process.pid()));
             }
         }
         // Try hyphen parts
         let parts: Vec<&str> = binary_name.split('-').collect();
         for part in &parts {
             if proc_name == *part {
-                return Ok(true);
+                return Ok(Some(process.pid()));
             }
         }
         // AppImage handling
@@ -54,17 +54,50 @@ pub fn is_process_running(binary: &str) -> Result<bool> {
                 .replace(".AppImage", "")
                 .replace(".appimage", "");
             if proc_name.starts_with(&basename) {
-                return Ok(true);
+                return Ok(Some(process.pid()));
             }
             let basename_parts: Vec<&str> = basename.split('-').collect();
             for part in &basename_parts {
                 if proc_name == *part {
-                    return Ok(true);
+                    return Ok(Some(process.pid()));
                 }
             }
         }
     }
-    Ok(false)
+    Ok(None)
+}
+
+/// Check if a binary is currently running using heuristic name matching.
+pub fn is_process_running(binary: &str) -> Result<bool> {
+    Ok(find_process(binary)?.is_some())
+}
+
+/// Terminate a running process: SIGTERM on Unix (graceful), forced kill on
+/// Windows (the only mechanism available there).
+pub fn terminate_process(binary: &str) -> Result<()> {
+    if let Some(pid) = find_process(binary)? {
+        let mut system = System::new_all();
+        system.refresh_processes(sysinfo::ProcessesToUpdate::Some(&[pid]), true);
+        if let Some(process) = system.process(pid) {
+            #[cfg(unix)]
+            let killed = process
+                .kill_with(sysinfo::Signal::Term)
+                .unwrap_or_else(|| process.kill());
+            #[cfg(not(unix))]
+            let killed = process.kill();
+            if killed {
+                zummon_debug!("Terminated process for '{}' (pid {})", binary, pid);
+            } else {
+                anyhow::bail!("Failed to terminate process for '{}' (pid {})", binary, pid);
+            }
+        }
+    } else {
+        zummon_debug!(
+            "terminate_process: no running process found for '{}'",
+            binary
+        );
+    }
+    Ok(())
 }
 
 // ============================================================================

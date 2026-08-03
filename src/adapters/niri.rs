@@ -178,6 +178,12 @@ impl Adapter for NiriAdapter {
         Ok(())
     }
 
+    async fn close_window(&self, window_id: &str) -> Result<()> {
+        self.niri_msg(&["action", "close-window", "--id", window_id])
+            .await?;
+        Ok(())
+    }
+
     async fn spawn_command_string(&mut self, cmd_str: &str) -> Result<()> {
         zummon_debug!("Executing directly via std::process: {}", cmd_str);
 

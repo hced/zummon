@@ -242,6 +242,12 @@ impl Adapter for SwayAdapter {
         Ok(())
     }
 
+    async fn close_window(&self, window_id: &str) -> Result<()> {
+        let cmd = format!("[con_id={}] kill", window_id);
+        self.swaymsg(&[&cmd]).await?;
+        Ok(())
+    }
+
     async fn spawn_command_string(&mut self, cmd_str: &str) -> Result<()> {
         let sway_cmd = format!("exec {}", cmd_str);
         zummon_debug!("Executing: swaymsg '{}'", sway_cmd);

@@ -217,6 +217,18 @@ end tell
         Ok(())
     }
 
+    async fn close_window(&self, window_id: &str) -> Result<()> {
+        let windows = self.get_windows_applescript().await?;
+        let window = windows
+            .iter()
+            .find(|w| w.id == window_id)
+            .context(format!("Window not found: {}", window_id))?;
+        let script = format!("tell application \"{}\" to quit", window.app_id);
+        zummon_debug!("Quitting app: {}", window.app_id);
+        self.osascript(&script).await?;
+        Ok(())
+    }
+
     async fn spawn_command_string(&mut self, cmd_str: &str) -> Result<()> {
         zummon_debug!("Executing: {}", cmd_str);
 

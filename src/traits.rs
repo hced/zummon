@@ -88,6 +88,11 @@ pub trait Adapter: Send + Sync {
     async fn find_window(&self, app_id: &str) -> Result<Option<String>>;
     async fn get_focused_window(&self) -> Result<Option<String>>;
     async fn focus_window(&self, window_id: &str) -> Result<()>;
+    async fn close_window(&self, _window_id: &str) -> Result<()> {
+        Err(anyhow::anyhow!(
+            "Closing windows is not supported on this platform."
+        ))
+    }
     async fn spawn_command_string(&mut self, cmd_str: &str) -> Result<()>;
     async fn get_window_ids(&self) -> Result<Vec<String>>;
     async fn validate_states(&self, states: Vec<WindowStateFlag>) -> Result<Vec<WindowState>>;

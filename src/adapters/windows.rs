@@ -218,6 +218,29 @@ $hwnd = [IntPtr]::new({0})
         Ok(())
     }
 
+    async fn close_window(&self, window_id: &str) -> Result<()> {
+        let script = format!(
+            r#"
+Add-Type @"
+using System;
+using System.Runtime.InteropServices;
+public class Win32Close {{
+    [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
+}}
+"@
+$hwnd = [IntPtr]::new({0})
+[Win32Close]::PostMessage($hwnd, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero) | Out-Null
+"#,
+            window_id
+        );
+
+        StdCommand::new("powershell")
+            .args(["-Command", &script])
+            .output()?;
+
+        Ok(())
+    }
+
     async fn spawn_command_string(&mut self, cmd_str: &str) -> Result<()> {
         zummon_debug!("Executing: {}", cmd_str);
 

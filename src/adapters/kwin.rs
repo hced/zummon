@@ -165,6 +165,15 @@ impl Adapter for KwinAdapter {
         Ok(())
     }
 
+    async fn close_window(&self, window_id: &str) -> Result<()> {
+        let script = format!(
+            "const c = workspace.clientList().find(c => String(c.windowId) === '{}'); if (c) c.closeWindow();",
+            window_id
+        );
+        self.kwin_script(&script).await?;
+        Ok(())
+    }
+
     async fn spawn_command_string(&mut self, cmd_str: &str) -> Result<()> {
         zummon_debug!("Executing: {}", cmd_str);
 

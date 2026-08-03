@@ -81,6 +81,11 @@ async fn main() -> Result<()> {
     ensure_session_environment();
 
     let cli = Cli::parse();
+    if cli.toggle && (cli.new_instance || cli.if_focused.is_some()) {
+        return Err(anyhow!(
+            "--toggle cannot be combined with --new-instance or --if-focused"
+        ));
+    }
     if let Some(maybe_path) = &cli.log {
         let log_path = match maybe_path {
             Some(path) => path.clone(),
@@ -195,7 +200,7 @@ async fn main() -> Result<()> {
     let validated_states = adapter.validate_states(cli.window_states()).await?;
     zummon_debug!("Validated window states: {:?}", validated_states);
 
-    let should_launch = if !cli.new_instance {
+    let found_window = if !cli.new_instance {
         let mut found_window = None;
         if let Some(window_id) = adapter.find_window(&match_app).await? {
             found_window = Some(window_id);
@@ -260,55 +265,85 @@ async fn main() -> Result<()> {
             }
         }
 
+        found_window
+    } else {
+        zummon_debug!("--new-instance set, skipping window lookup");
+        None
+    };
+
+    if cli.toggle {
         match found_window {
             Some(window_id) => {
-                zummon_debug!("Found window: {}", window_id);
-                let focused_id = adapter.get_focused_window().await?;
-                if focused_id == Some(window_id.clone()) {
-                    if let Some(cmd) = &cli.if_focused {
-                        zummon_debug!("Window already focused, executing: {}", cmd);
-                        launch::execute_if_focused_command(cmd).await?;
-                        if !cli.extra_args.is_empty() {
-                            zummon_debug!("Delivering extra_args after if-focused command");
-                            launch::deliver_args_to_running(&cli).await?;
-                        }
-                        return Ok(());
-                    }
-                    if !cli.extra_args.is_empty() {
-                        zummon_debug!(
-                            "Window already focused, delivering extra_args ({} item(s))",
-                            cli.extra_args.len()
-                        );
-                        launch::deliver_args_to_running(&cli).await?;
-                        return Ok(());
-                    }
-                    zummon_debug!("Window already focused, doing nothing");
-                    return Ok(());
+                zummon_debug!("Toggle: closing window {}", window_id);
+                adapter.close_window(&window_id).await?;
+                let mut attempts = 0;
+                while attempts < 8 && focus::is_process_running(&cli.app)? {
+                    tokio::time::sleep(tokio::time::Duration::from_millis(250)).await;
+                    attempts += 1;
                 }
-                zummon_debug!("Focusing window: {}", window_id);
-                adapter.focus_window(&window_id).await?;
-                if cli.override_state && !validated_states.is_empty() {
-                    adapter
-                        .apply_states_to_window(&window_id, &validated_states)
-                        .await?;
+                if focus::is_process_running(&cli.app)? {
+                    zummon_debug!("Process still running after window close, terminating it");
+                    focus::terminate_process(&cli.app)?;
+                }
+            }
+            None => {
+                if focus::is_process_running(&cli.app)? {
+                    zummon_debug!("Toggle: no window found but process running, terminating it");
+                    focus::terminate_process(&cli.app)?;
+                } else {
+                    zummon_debug!("Toggle: app not running, launching");
+                    launch::launch_app(&cli, &match_app, &validated_states, &mut *adapter).await?;
+                }
+            }
+        }
+        return Ok(());
+    }
+
+    let should_launch = match found_window {
+        Some(window_id) => {
+            zummon_debug!("Found window: {}", window_id);
+            let focused_id = adapter.get_focused_window().await?;
+            if focused_id == Some(window_id.clone()) {
+                if let Some(cmd) = &cli.if_focused {
+                    zummon_debug!("Window already focused, executing: {}", cmd);
+                    launch::execute_if_focused_command(cmd).await?;
+                    if !cli.extra_args.is_empty() {
+                        zummon_debug!("Delivering extra_args after if-focused command");
+                        launch::deliver_args_to_running(&cli).await?;
+                    }
+                    return Ok(());
                 }
                 if !cli.extra_args.is_empty() {
                     zummon_debug!(
-                        "extra_args present ({} item(s)), delivering to running instance",
+                        "Window already focused, delivering extra_args ({} item(s))",
                         cli.extra_args.len()
                     );
                     launch::deliver_args_to_running(&cli).await?;
+                    return Ok(());
                 }
-                false
+                zummon_debug!("Window already focused, doing nothing");
+                return Ok(());
             }
-            None => {
-                zummon_debug!("No existing window found");
-                true
+            zummon_debug!("Focusing window: {}", window_id);
+            adapter.focus_window(&window_id).await?;
+            if cli.override_state && !validated_states.is_empty() {
+                adapter
+                    .apply_states_to_window(&window_id, &validated_states)
+                    .await?;
             }
+            if !cli.extra_args.is_empty() {
+                zummon_debug!(
+                    "extra_args present ({} item(s)), delivering to running instance",
+                    cli.extra_args.len()
+                );
+                launch::deliver_args_to_running(&cli).await?;
+            }
+            false
         }
-    } else {
-        zummon_debug!("--new-instance set, skipping window lookup");
-        true
+        None => {
+            zummon_debug!("No existing window found");
+            true
+        }
     };
 
     if should_launch {
