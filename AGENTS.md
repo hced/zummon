@@ -5,32 +5,38 @@ Rust Edition 2024. Only Niri (Linux/Wayland) is verified; all other platform ada
 
 ## Commands (via `just`, not bare cargo)
 
-Use `just --list` for the full set.
+Use `just --list` for the full set. The justfile is the source of truth.
 
-- `just build` / `just run <args>` / `just tests` — defaults to debug for development.
-- `just build-release` / `just run-release <args>` — verify final artifacts/performance.
-- `just fmt` / `just fmt-check` — formatting (CI uses `fmt --check`)
-- `just lint` — `cargo clippy -- -D warnings` (warnings are errors; don't add code that trips clippy)
-- `just check` — fast compile check
-- `just bump-patch|minor|major` / `just release` — version bumps & git tag/release flow (uses `cargo-bump`)
+- `just build` / `just run <args>` / `just tests` — **release by default**; debug variants are `build-debug` / `run-debug` / `tests-debug`.
+- `just check` — fast compile check; use for quick verification.
+- `just fmt` / `just fmt-check` — formatting.
+- `just lint` — `cargo clippy --release -- -D warnings`. **Currently fails with ~20 pre-existing errors** in main.rs, launch.rs, find_latest.rs, and the adapters; don't fix them wholesale, but don't add new ones.
+- `just bump-patch|minor|major` / `just release` — version bump & git tag/release flow (uses `cargo-bump`).
 
-Run a single test: `cargo test <test_name>`.
+There are **no tests** in the crate; `just tests` only compiles an empty suite.
+
+## CI & Release
+
+- `.github/workflows/cross-platform_ci_and_cd.yml` triggers **only on `v*` tag pushes** (never on main pushes or PRs): builds + `cargo test --release` on ubuntu/windows/macos, then publishes a GitHub Release with per-OS tarballs/zip and `checksums.txt`.
+- Release flow: `just release` → interactive version bump → commit → tag `vX.Y.Z` → push → CI builds & publishes.
 
 ## Workflow
-Debug builds are the default for development. Once confirmed that there are no errors, always build the release variant and afterwards commit the changes using git (not jj).
+
+Once the code compiles, build the release variant, then commit with git using a conventional commit prefix (`chore:` / `fix:` / `feat:` / `docs:` / `ci:`). Use `just` recipes instead of bare `cargo` commands.
 
 ## Architecture
 
-- `src/main.rs` — entrypoint + orchestration; restores stripped session env vars (DBUS/XDG) at startup, then dispatches by detected `Platform`/`LinuxWindowSystem`.
+- `src/main.rs` — entrypoint + orchestration; restores stripped session env vars (DBUS_SESSION_BUS_ADDRESS, XDG_RUNTIME_DIR, XDG_DATA_DIRS, XDG_CONFIG_DIRS) at startup, then dispatches by detected `Platform`/`LinuxWindowSystem`.
 - `src/adapters/` — one module per platform/compositor (niri, hyprland, sway, kwin, mutter, macos, windows) implementing the `Adapter` trait (`src/traits.rs`). Add/extend platform behavior here, not in `main.rs`.
-- `src/launch.rs` — launching, `--if-focused` commands, arg delivery to running instances.
+- `src/launch.rs` — launching, `--if-focused` commands, arg delivery to running instances, `$TERMINAL` detection for `--tui` (see `.opencode/plans/terminal_env_*.md` for known pitfalls).
 - `src/find_latest.rs` — 4-phase cascading search for latest version in a versioned directory tree (wax globs → Jaro-Winkler → multi-tier fuzzy → exhaustive fallback).
 - `src/focus.rs` / `src/cli.rs` — process/window matching heuristics and clap CLI definition.
 
-Window heuristics run only for Hyprland/Sway/Niri/macOS/Windows when no exact window match is found.
+Window heuristics run only for Hyprland/Sway/Niri/macOS/Windows when no exact window match is found (Mutter is launch-only).
 
 ## Notes
 
-- No CI config or other instruction files exist in this repo. Follow the `just` recipes above as the source of truth for build/test/lint order.
-- VCS is git (`origin/main`). A `.jj` repo also exists alongside it; treat git as authoritative.
+- VCS is git only (`origin/main`). No `.jj` repo.
+- `.bkp/` holds stale source backups — gitignored; never edit or rely on it.
+- `.opencode/agents/` defines the project team (James builds & commits; Sarah maintains SPECS.md/README.md/AGENTS.md); `.opencode/plans/` holds design docs.
 - Debug/logging: `--debug` (stdout), `--log` (file), combined. Default log at `~/.local/state/zummon/zummon.log` (Linux).
