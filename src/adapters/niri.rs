@@ -107,35 +107,6 @@ impl NiriAdapter {
         use crate::focus::find_window_with_heuristics;
         find_window_with_heuristics(self, binary).await
     }
-
-    pub async fn spawn_and_discover_app_id(&mut self, cmd_str: &str) -> Result<Option<String>> {
-        let pre_windows = self.get_windows_json().await?;
-        let pre_window_ids: Vec<String> = pre_windows.iter().map(|w| w.id.to_string()).collect();
-        zummon_debug!("Pre-spawn windows: {}", pre_window_ids.len());
-        self.spawn_command_string(cmd_str).await?;
-        let timeout_ms = 5000;
-        let interval_ms = 100;
-        let max_attempts = timeout_ms / interval_ms;
-        for attempt in 0..max_attempts {
-            tokio::time::sleep(tokio::time::Duration::from_millis(interval_ms)).await;
-            let post_windows = self.get_windows_json().await?;
-            for window in &post_windows {
-                if !pre_window_ids.contains(&window.id.to_string()) {
-                    zummon_debug!(
-                        "New window detected after {}ms: id={}, app_id={:?}",
-                        attempt * interval_ms,
-                        window.id,
-                        window.app_id
-                    );
-                    if let Some(app_id) = &window.app_id {
-                        return Ok(Some(app_id.clone()));
-                    }
-                }
-            }
-        }
-        zummon_debug!("Timeout waiting for new window to appear");
-        Ok(None)
-    }
 }
 
 #[async_trait]

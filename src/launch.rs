@@ -1,5 +1,4 @@
 // src/launch.rs - Version resolution + command building + launching
-use crate::adapters::niri::NiriAdapter;
 use crate::cli::Cli;
 use crate::find_latest;
 use crate::traits::{Adapter, WindowState};
@@ -300,7 +299,6 @@ async fn resolve_binary_and_args(cli: &Cli) -> Result<(String, Vec<String>)> {
 
 pub async fn launch_app(
     cli: &Cli,
-    match_app: &str,
     validated_states: &[WindowState],
     adapter: &mut dyn Adapter,
 ) -> Result<()> {
@@ -341,54 +339,20 @@ pub async fn launch_app(
         let tui_cmd = build_tui_command(cli, &launch_bin, &extra_args).await?;
         zummon_debug!("TUI command: {}", tui_cmd);
 
-        if let Some(niri_adapter) = adapter.as_any_mut().downcast_mut::<NiriAdapter>() {
-            let discovered_app_id = niri_adapter.spawn_and_discover_app_id(&tui_cmd).await?;
-            if let Some(actual_app_id) = discovered_app_id {
-                zummon_debug!(
-                    "Discovered actual app_id: {} (was looking for: {})",
-                    actual_app_id,
-                    match_app
-                );
-            }
-        } else {
-            adapter.spawn_command_string(&tui_cmd).await?;
-        }
+        adapter.spawn_command_string(&tui_cmd).await?;
     } else {
         // Direct launch: use Command::arg() so paths with spaces are never word-split.
         zummon_debug!("Launching '{}' directly with Command::arg()", launch_bin);
 
         let mut cmd = build_direct_command(cli, &launch_bin, &extra_args);
-
-        if let Some(niri_adapter) = adapter.as_any_mut().downcast_mut::<NiriAdapter>() {
-            // Niri needs to know the command string for app_id discovery.
-            // We rebuild as a shell string only for that purpose.
-            let cmd_str_for_niri = build_shell_cmd_string(cli, &launch_bin, &extra_args);
-            let discovered_app_id = niri_adapter
-                .spawn_and_discover_app_id(&cmd_str_for_niri)
-                .await?;
-            if let Some(actual_app_id) = discovered_app_id {
-                zummon_debug!(
-                    "Discovered actual app_id: {} (was looking for: {})",
-                    actual_app_id,
-                    match_app
-                );
-                if actual_app_id != match_app {
-                    zummon_debug!(
-                        "Note: Actual app_id differs. Future runs may need --app-id {}",
-                        actual_app_id
-                    );
-                }
-            }
-        } else {
-            let child = cmd
-                .stdin(Stdio::null())
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .spawn()
-                .context("Failed to spawn application")?;
-            zummon_debug!("Process spawned with PID: {}", child.id().unwrap_or(0));
-            std::mem::forget(child);
-        }
+        let child = cmd
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .context("Failed to spawn application")?;
+        zummon_debug!("Process spawned with PID: {}", child.id().unwrap_or(0));
+        std::mem::forget(child);
     }
 
     if !validated_states.is_empty() && !cli.bypass_adapter {
@@ -483,8 +447,8 @@ fn apply_env_to_command(cli: &Cli, cmd: &mut Command) {
 }
 
 /// Build a shell-string representation of the command (used only for
-/// --bypass-adapter and for passing to Niri's spawn_and_discover_app_id).
-/// File paths are single-quoted so spaces survive sh -c word-splitting.
+/// --bypass-adapter). File paths are single-quoted so spaces survive sh -c
+/// word-splitting.
 fn build_shell_cmd_string(cli: &Cli, launch_bin: &str, extra_args: &[String]) -> String {
     let mut parts = vec![shell_quote(launch_bin)];
 

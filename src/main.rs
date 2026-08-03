@@ -292,7 +292,7 @@ async fn main() -> Result<()> {
                     focus::terminate_process(&cli.app)?;
                 } else {
                     zummon_debug!("Toggle: app not running, launching");
-                    launch::launch_app(&cli, &match_app, &validated_states, &mut *adapter).await?;
+                    launch::launch_app(&cli, &validated_states, &mut *adapter).await?;
                 }
             }
         }
@@ -347,7 +347,7 @@ async fn main() -> Result<()> {
     };
 
     if should_launch {
-        launch::launch_app(&cli, &match_app, &validated_states, &mut *adapter).await?;
+        launch::launch_app(&cli, &validated_states, &mut *adapter).await?;
     }
 
     Ok(())
