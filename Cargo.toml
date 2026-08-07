@@ -1,6 +1,6 @@
 [package]
 name = "zummon"
-version = "0.3.8"
+version = "0.3.9"
 edition = "2024"
 description = "Summon an app to the foreground or launch it if not running – with heuristic window matching, latest version selection, and more"
 authors = ["H. Cederblad"]
