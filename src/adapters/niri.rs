@@ -132,7 +132,38 @@ impl Adapter for NiriAdapter {
                     .unwrap_or(false)
             })
             .next_back();
-        Ok(matching.map(|w| w.id.to_string()))
+        if let Some(window) = matching {
+            return Ok(Some(window.id.to_string()));
+        }
+        // Some Wayland apps (notably WebKitGTK/Tauri) map windows with an empty
+        // app_id, so they can never match the app_id suffix scan above. Fall back
+        // to matching such windows by title instead.
+        let by_title = windows
+            .iter()
+            .filter(|w| {
+                w.app_id.as_deref().map(str::trim).unwrap_or("").is_empty()
+                    && w.title
+                        .as_ref()
+                        .map(|t| {
+                            let title = t.to_lowercase();
+                            // Exact case-insensitive match, or a substring match only
+                            // for sufficiently specific queries (avoids short, ambiguous
+                            // ones like --app-id gui matching any empty-app_id title).
+                            title == app_id_lower
+                                || (app_id_lower.len() >= 3 && title.contains(&app_id_lower))
+                        })
+                        .unwrap_or(false)
+            })
+            .next_back();
+        if let Some(window) = by_title {
+            zummon_debug!(
+                "No app_id match for '{}', matched empty-app_id window by title",
+                app_id
+            );
+            return Ok(Some(window.id.to_string()));
+        }
+
+        Ok(None)
     }
 
     async fn get_focused_window(&self) -> Result<Option<String>> {

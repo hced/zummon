@@ -570,3 +570,25 @@ pub async fn build_match_app(cli: &Cli) -> Result<String> {
             }))
     }
 }
+
+/// Best process/binary name to search for in the process table. For --latest
+/// and directory-based apps, cli.app is a folder (not an executable), so its
+/// basename won't match the running process; resolve the actual binary instead.
+pub async fn build_process_search_name(cli: &Cli) -> String {
+    let fallback = || {
+        Path::new(cli.app.trim_end_matches('/').trim_end_matches('\\'))
+            .file_name()
+            .unwrap_or_else(|| std::ffi::OsStr::new(&cli.app))
+            .to_string_lossy()
+            .to_string()
+    };
+
+    match resolve_binary_and_args(cli).await {
+        Ok((binary, _)) => Path::new(&binary)
+            .file_name()
+            .map(|name| name.to_string_lossy().to_string())
+            .filter(|name| !name.is_empty())
+            .unwrap_or_else(fallback),
+        Err(_) => fallback(),
+    }
+}

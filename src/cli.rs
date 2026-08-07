@@ -175,7 +175,7 @@ pub struct Cli {
     #[arg(short = 't', long)]
     pub terminal: Option<String>,
 
-    #[arg(long)]
+    #[arg(long, alias = "appid")]
     pub app_id: Option<String>,
 
     #[arg(long)]

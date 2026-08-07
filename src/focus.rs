@@ -145,7 +145,23 @@ pub async fn find_window_with_heuristics(
         binary
     );
     let windows = adapter.get_windows_json().await?;
-    let candidates: Vec<&String> = windows.iter().filter_map(|w| w.app_id.as_ref()).collect();
+    let mut candidates: Vec<String> = windows.iter().filter_map(|w| w.app_id.clone()).collect();
+    // Windows with an empty app_id (WebKitGTK/Tauri on Wayland) are invisible
+    // to app_id matching; include their titles as candidates so they can still
+    // be found by fuzzy name matching.
+    for window in &windows {
+        if window
+            .app_id
+            .as_deref()
+            .map(str::trim)
+            .unwrap_or("")
+            .is_empty()
+        {
+            if let Some(title) = &window.title {
+                candidates.push(title.clone());
+            }
+        }
+    }
     if candidates.is_empty() {
         return Ok(None);
     }
@@ -165,7 +181,7 @@ pub async fn find_window_with_heuristics(
             let score = engine.score(candidate);
             if score > best_score {
                 best_score = score;
-                best_match = Some((*candidate, score));
+                best_match = Some((candidate, score));
             }
         }
     }

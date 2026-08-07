@@ -206,16 +206,24 @@ async fn main() -> Result<()> {
             found_window = Some(window_id);
         }
 
-        if found_window.is_none() && cli.app_id.is_none() && cli.class.is_none() && !cli.tui {
-            let is_running = focus::is_process_running(&cli.app)?;
+        // Heuristics run whenever the direct match failed (even with --app-id/
+        // --class set): an explicit id that doesn't match any window (e.g. an
+        // app whose window reports an empty app_id) shouldn't silently launch a
+        // duplicate. The process-running check and fuzzy threshold guard this.
+        if found_window.is_none() && !cli.tui {
+            // Use the resolved binary name (cli.app may be a versioned directory)
+            // so process detection works for --latest / directory-based apps.
+            let process_search_name = launch::build_process_search_name(&cli).await;
+            let is_running = focus::is_process_running(&process_search_name)?;
             if is_running {
                 zummon_debug!("Process is running but no window found. Applying heuristics...");
                 if let Some(hypr_adapter) = adapter
                     .as_any_mut()
                     .downcast_mut::<adapters::hyprland::HyprlandAdapter>()
                 {
-                    if let Some(window_id) =
-                        hypr_adapter.find_window_with_heuristics(&cli.app).await?
+                    if let Some(window_id) = hypr_adapter
+                        .find_window_with_heuristics(&process_search_name)
+                        .await?
                     {
                         zummon_debug!("Heuristics (Hyprland) found window!");
                         found_window = Some(window_id);
@@ -224,8 +232,9 @@ async fn main() -> Result<()> {
                     .as_any_mut()
                     .downcast_mut::<adapters::sway::SwayAdapter>()
                 {
-                    if let Some(window_id) =
-                        sway_adapter.find_window_with_heuristics(&cli.app).await?
+                    if let Some(window_id) = sway_adapter
+                        .find_window_with_heuristics(&process_search_name)
+                        .await?
                     {
                         zummon_debug!("Heuristics (Sway) found window!");
                         found_window = Some(window_id);
@@ -235,7 +244,8 @@ async fn main() -> Result<()> {
                     .downcast_mut::<adapters::niri::NiriAdapter>()
                 {
                     if let Some(window_id) =
-                        focus::find_window_with_heuristics(niri_adapter, &cli.app).await?
+                        focus::find_window_with_heuristics(niri_adapter, &process_search_name)
+                            .await?
                     {
                         zummon_debug!("Heuristics (Niri) found window!");
                         found_window = Some(window_id);
@@ -244,8 +254,9 @@ async fn main() -> Result<()> {
                     .as_any_mut()
                     .downcast_mut::<adapters::macos::MacOSAdapter>()
                 {
-                    if let Some(window_id) =
-                        macos_adapter.find_window_with_heuristics(&cli.app).await?
+                    if let Some(window_id) = macos_adapter
+                        .find_window_with_heuristics(&process_search_name)
+                        .await?
                     {
                         zummon_debug!("Heuristics (macOS) found window!");
                         found_window = Some(window_id);
@@ -255,7 +266,7 @@ async fn main() -> Result<()> {
                     .downcast_mut::<adapters::windows::WindowsAdapter>(
                 ) {
                     if let Some(window_id) = windows_adapter
-                        .find_window_with_heuristics(&cli.app)
+                        .find_window_with_heuristics(&process_search_name)
                         .await?
                     {
                         zummon_debug!("Heuristics (Windows) found window!");
@@ -272,24 +283,25 @@ async fn main() -> Result<()> {
     };
 
     if cli.toggle {
+        let process_search_name = launch::build_process_search_name(&cli).await;
         match found_window {
             Some(window_id) => {
                 zummon_debug!("Toggle: closing window {}", window_id);
                 adapter.close_window(&window_id).await?;
                 let mut attempts = 0;
-                while attempts < 8 && focus::is_process_running(&cli.app)? {
+                while attempts < 8 && focus::is_process_running(&process_search_name)? {
                     tokio::time::sleep(tokio::time::Duration::from_millis(250)).await;
                     attempts += 1;
                 }
-                if focus::is_process_running(&cli.app)? {
+                if focus::is_process_running(&process_search_name)? {
                     zummon_debug!("Process still running after window close, terminating it");
-                    focus::terminate_process(&cli.app)?;
+                    focus::terminate_process(&process_search_name)?;
                 }
             }
             None => {
-                if focus::is_process_running(&cli.app)? {
+                if focus::is_process_running(&process_search_name)? {
                     zummon_debug!("Toggle: no window found but process running, terminating it");
-                    focus::terminate_process(&cli.app)?;
+                    focus::terminate_process(&process_search_name)?;
                 } else {
                     zummon_debug!("Toggle: app not running, launching");
                     launch::launch_app(&cli, &validated_states, &mut *adapter).await?;
